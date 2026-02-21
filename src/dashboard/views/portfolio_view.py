@@ -1,0 +1,46 @@
+"""Single-market portfolio tab renderer."""
+import streamlit as st
+from src.dashboard.components.position_table import render_position_table
+from src.dashboard.components.charts import allocation_pie, pnl_bar
+
+
+def render(positions: dict, prices: dict, currency_symbol: str, cash: float, title: str) -> None:
+    """Render a single-market portfolio tab at full width.
+
+    Args:
+        positions: {symbol: Position} for one market
+        prices: {symbol: current_price}
+        currency_symbol: '₪' or '$'
+        cash: cash balance for this account
+        title: display title for the section header
+    """
+    st.subheader(title)
+
+    filtered_prices = {s: prices.get(s) for s in positions}
+    invested = sum(p.total_invested for p in positions.values())
+    market_value = sum(
+        (prices.get(s) or 0) * p.quantity for s, p in positions.items()
+    )
+    pnl = market_value - invested
+    pnl_pct = (pnl / invested * 100) if invested > 0 else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Invested", f"{currency_symbol}{invested:,.0f}")
+    m2.metric("Market Value", f"{currency_symbol}{market_value:,.0f}")
+    m3.metric("P&L", f"{currency_symbol}{pnl:+,.0f}")
+    m4.metric("P&L %", f"{pnl_pct:+.1f}%")
+
+    st.info(f"💰 Cash: **{currency_symbol}{cash:,.2f}**")
+
+    render_position_table(positions, currency_symbol, filtered_prices)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = allocation_pie(positions, filtered_prices, currency_symbol, f"{title} Allocation")
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        fig2 = pnl_bar(positions, filtered_prices, currency_symbol, f"{title} P&L")
+        if fig2:
+            st.plotly_chart(fig2, use_container_width=True)

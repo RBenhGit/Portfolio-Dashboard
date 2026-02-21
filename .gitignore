@@ -1,0 +1,8 @@
+.env
+data/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+.claude/
+Trans_Input/*.xlsx
