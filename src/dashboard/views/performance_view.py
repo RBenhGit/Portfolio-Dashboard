@@ -1,6 +1,4 @@
 """Tab — Portfolio Performance over time with benchmark comparison."""
-from datetime import date
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -15,7 +13,7 @@ from src.dashboard.components.performance_metrics import (
 )
 
 
-def render(current_market_value_nis: float | None = None) -> None:
+def render() -> None:
     """Render the Performance tab."""
     # ── Build portfolio value series ─────────────────────────────────────────
     states = repository.get_daily_portfolio_states()
@@ -45,14 +43,6 @@ def render(current_market_value_nis: float | None = None) -> None:
     if stable_mask.any():
         first_stable = stable_mask.idxmax()  # first True
         portfolio_series = portfolio_series.loc[first_stable:]
-
-    # Append current market value as today's data point
-    if current_market_value_nis is not None and current_market_value_nis > 0:
-        today = pd.Timestamp(date.today())
-        if today not in portfolio_series.index:
-            portfolio_series[today] = current_market_value_nis
-        else:
-            portfolio_series.loc[today] = current_market_value_nis
 
     if len(portfolio_series) < 2:
         st.info("Not enough data points for performance analysis.")

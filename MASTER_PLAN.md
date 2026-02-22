@@ -1,4 +1,4 @@
-# Portfolio Dashboard — Implementation Plan (v2)
+# Portfolio Dashboard — Implementation Plan (v3)
 
 ## Context
 
@@ -10,6 +10,8 @@ May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction
 - Tab 1: TASE (₪) — full-width NIS positions
 - Tab 2: US ($) — full-width USD positions
 - Tab 3: Merged portfolio (all in ₪ using historically-correct FX rates)
+- Tab 4: Options — open options positions (NIS + USD)
+- Tab 5: Performance — historical returns with benchmark comparison (S&P 500, TA-125)
 - All 21 IBI transaction types handled correctly, including stock splits
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
@@ -52,7 +54,7 @@ src/classifiers/ibi_classifier.py  ← 21 types → effect, direction,
                                       cash_flow_nis, cash_flow_usd
         │
         ▼
-src/database/db.py                 ← SQLite: 9 tables
+src/database/db.py                 ← SQLite: 11 tables
 src/database/repository.py        ← CRUD + dedup insert
         │
         ▼
@@ -71,6 +73,10 @@ app.py → Streamlit
     Tab 1: TASE (₪) — full-width NIS positions
     Tab 2: US ($) — full-width USD positions
     Tab 3: Merged (₪) — all positions converted to shekels
+    Tab 4: Options — open options positions
+    Tab 5: Performance — historical returns vs benchmarks
+
+src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 ```
 
 ---
@@ -79,10 +85,17 @@ app.py → Streamlit
 
 ```
 Portfolio_Dashboard/
-├── app.py                              # Streamlit entry point
+├── app.py                              # Streamlit entry point (5 tabs)
+├── MASTER_PLAN.md                      # This file — architecture & implementation plan
+├── README.md                           # Project overview
 ├── requirements.txt
 ├── .env.example                        # API key template
 ├── .gitignore
+├── docs/                               # Project documentation
+│   ├── performance-tab-why-how-what.md # Performance tab deep-dive
+│   ├── Insufficient_Shares_Investigation_2026-02-20.md
+│   ├── Project_ReEvaluation_2026-02-20.md
+│   └── 2000_api_guide_eng.pdf          # IBI API reference
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx           # Source (read-only)
 ├── data/
@@ -105,14 +118,18 @@ Portfolio_Dashboard/
     ├── market/
     │   ├── price_fetcher.py           # Twelvedata + yfinance fallback
     │   ├── fx_fetcher.py              # USD/ILS historical + current rates
+    │   ├── benchmark_fetcher.py       # S&P 500 & TA-125 via yfinance + SQLite cache
     │   └── symbol_mapper.py           # Market detection, TASE symbol handling
     └── dashboard/
         ├── views/
         │   ├── portfolio_view.py      # render(positions, prices, currency_symbol, cash, title)
         │   │                          #   Renders ONE market at full width (called per tab)
-        │   └── merged_view.py         # render(portfolio, prices, price_date) — all in ₪
+        │   ├── merged_view.py         # render(portfolio, prices, price_date) — all in ₪
+        │   ├── options_view.py        # render(options_nis, options_usd) — open options
+        │   └── performance_view.py    # render() — historical returns + benchmark comparison
         └── components/
             ├── position_table.py      # Reusable styled position table
+            ├── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
             └── charts.py             # Plotly pie + bar charts
                                        # TASE chart labels use _display_label() to resolve
                                        # IBI numeric IDs (e.g. "445015") to ticker symbols
@@ -121,7 +138,7 @@ Portfolio_Dashboard/
 
 ---
 
-## SQLite Schema (9 tables)
+## SQLite Schema (11 tables)
 
 ```sql
 -- All parsed & classified transactions
@@ -263,6 +280,23 @@ CREATE TABLE import_log (
     rows_total     INTEGER,
     rows_new       INTEGER,
     rows_duplicate INTEGER
+);
+
+-- TASE symbol resolution cache (IBI numeric ID → ticker)
+CREATE TABLE tase_symbol_map (
+    ibi_id      TEXT PRIMARY KEY,    -- IBI numeric ID (e.g. "445015")
+    td_symbol   TEXT,                -- Twelvedata symbol
+    yf_symbol   TEXT,                -- yfinance symbol (e.g. "445015.TA")
+    name        TEXT                 -- Human-readable name (e.g. "Matrix IT")
+);
+
+-- Benchmark index price cache (S&P 500, TA-125)
+CREATE TABLE benchmark_cache (
+    symbol     TEXT NOT NULL,        -- yfinance ticker (^GSPC, ^TA125.TA)
+    date       TEXT NOT NULL,        -- YYYY-MM-DD
+    close      REAL NOT NULL,        -- closing price
+    fetched_at TEXT NOT NULL,        -- ISO datetime
+    PRIMARY KEY (symbol, date)
 );
 ```
 
@@ -435,16 +469,16 @@ Market detection (in priority order):
 
 ---
 
-## Dashboard Layout (Streamlit — 3 Tabs)
+## Dashboard Layout (Streamlit — 5 Tabs)
 
 ### Tab 1: TASE (₪) — full-width NIS positions
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]   [▶ sidebar]  │
-├───────────┬───────────────┬───────────────────────────────────────────────┤
-│  TASE (₪) │  US ($)       │  Merged (₪)                                  │
-├───────────┴───────────────┴───────────────────────────────────────────────┤
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
+├───────────┬──────────┬────────────┬────────────┬──────────────────────────────────┤
+│  TASE (₪) │  US ($)  │ Merged (₪) │  Options   │  Performance                    │
+├───────────┴──────────┴────────────┴────────────┴──────────────────────────────────┤
 │  ┌──── TASE Account (₪) ─────────────────────────────────────────────────┐│
 │  │ [Invested] [Market] [P&L] [P&L%]                                     ││
 │  │ [Cash: ₪ XXX]                                                        ││
@@ -495,6 +529,54 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 - `USD position cost (₪)` = `total_invested_nis` (weighted sum of historical FX rates, stored in DB)
 - `USD position value (₪)` = `quantity × price_usd × fx_rate_on_reference_date`
 - `USD cash (₪)` = `usd_cash × fx_rate_on_reference_date`
+
+### Tab 4: Options — open options positions
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Open Options Positions                                                   │
+│                                                                           │
+│  NIS Options table (if any):                                             │
+│  Symbol | Name | Qty | Avg Cost (₪) | Invested (₪)                      │
+│                                                                           │
+│  USD Options table (if any):                                             │
+│  Symbol | Name | Qty | Avg Cost ($) | Invested ($)                       │
+│                                                                           │
+│  st.info if no options positions found                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `options_view.render(options_nis, options_usd)`. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
+
+### Tab 5: Performance — historical returns with benchmark comparison
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  [Total Return] [CAGR] [Max Drawdown] [Sharpe Ratio]  ← 4 metric cards  │
+│  S&P 500: Total Return +XX.X% | CAGR +XX.X%           ← benchmark caps  │
+│  TA-125:  Total Return +XX.X% | CAGR +XX.X%                             │
+│  ─────────────────────────────────────────────────                       │
+│  Portfolio Value Over Time (₪)                         ← Plotly chart 1  │
+│  ─────────────────────────────────────────────────                       │
+│  Cumulative Returns vs Benchmarks (base 100)           ← Plotly chart 2  │
+│  ─ Portfolio (blue solid)                                                │
+│  ─ S&P 500 (orange dashed)                                              │
+│  ─ TA-125 (green dashed)                                                │
+│                                                                           │
+│  "Portfolio value is based on cost basis + cumulative realized P&L.      │
+│   It does not reflect unrealized gains/losses on open positions."        │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `performance_view.render()` (no parameters). Key design decisions:
+
+- **Historical data only** — charts display stored daily portfolio states; no forward-looking projections or live market value injection
+- **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
+- **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
+- **Valuation method** — cost basis + realized P&L only (consistent with `daily_portfolio_state` methodology)
+- **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 4% risk-free rate, 252 trading days, min 30 data points
+
+See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md) for full architectural deep-dive.
 
 ### Sidebar
 
@@ -566,10 +648,18 @@ repository.save_snapshot()  →  portfolio_snapshots + position_snapshots
 
 ---
 
-## Historical Analysis Enabled
+## Historical Analysis
+
+### Performance Tab (implemented — Tab 5)
+
+Uses `daily_portfolio_state` to render:
+- **Portfolio Value Over Time** — line chart of cost basis + realized P&L in ₪
+- **Cumulative Returns vs Benchmarks** — base-100 normalized comparison against S&P 500 and TA-125
+- **Key Metrics** — Total Return, CAGR, Max Drawdown, Sharpe Ratio
+- Stabilization detection auto-skips initial build-up period
 
 ### From `daily_portfolio_state` (cost basis, no price API):
-- Total capital deployed over time (line chart)
+- Total capital deployed over time (line chart) ✅ (Performance tab)
 - NIS cash + USD cash over time
 - Net inflows vs reinvested proceeds
 
@@ -615,22 +705,24 @@ yfinance>=0.2.66
 
 ## Implementation Order
 
-1. **Scaffolding** — folders, `requirements.txt`, `.env.example`, `.gitignore`
-2. **Config** — `src/config.py`
-3. **Database** — `src/database/db.py` (9 tables), `src/database/repository.py`
-4. **Excel reader** — `src/input/excel_reader.py` (read, sort ASC, `row_hash`)
-5. **Models** — `src/models/transaction.py`, `src/models/position.py`
-6. **Classifier** — `base_classifier.py` (ABC) + `ibi_classifier.py` (all 21 types + cash flows + cost_basis_nis)
-7. **FX fetcher** — `src/market/fx_fetcher.py` (bulk historical fetch on startup)
-8. **Ingestion pipeline** — Excel → classify → fetch FX → dedup insert
-9. **Symbol mapper** — `src/market/symbol_mapper.py`
-10. **Portfolio builder** — `src/portfolio/builder.py` (sequential pass, options reorder, split logic, daily_state, realized_trades)
-11. **Price fetcher** — `src/market/price_fetcher.py` (Twelvedata + yfinance + TASE agorot verification)
-12. **Snapshot writer** — `repository.save_snapshot()` (called after each import/refresh)
-13. **Components** — `position_table.py` (with cash row), `charts.py`
-14. **Views** — `portfolio_view.py` (Tab 1: TASE, Tab 2: US — each full width), `merged_view.py` (Tab 3)
-15. **App entry point** — `app.py` (3 tabs + sidebar uploader)
-16. **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
+1. ✅ **Scaffolding** — folders, `requirements.txt`, `.env.example`, `.gitignore`
+2. ✅ **Config** — `src/config.py`
+3. ✅ **Database** — `src/database/db.py` (11 tables), `src/database/repository.py`
+4. ✅ **Excel reader** — `src/input/excel_reader.py` (read, sort ASC, `row_hash`)
+5. ✅ **Models** — `src/models/transaction.py`, `src/models/position.py`
+6. ✅ **Classifier** — `base_classifier.py` (ABC) + `ibi_classifier.py` (all 21 types + cash flows + cost_basis_nis)
+7. ✅ **FX fetcher** — `src/market/fx_fetcher.py` (bulk historical fetch on startup)
+8. ✅ **Ingestion pipeline** — Excel → classify → fetch FX → dedup insert
+9. ✅ **Symbol mapper** — `src/market/symbol_mapper.py`
+10. ✅ **Portfolio builder** — `src/portfolio/builder.py` (sequential pass, options reorder, split logic, daily_state, realized_trades)
+11. ✅ **Price fetcher** — `src/market/price_fetcher.py` (Twelvedata + yfinance + TASE agorot verification)
+12. ✅ **Snapshot writer** — `repository.save_snapshot()` (called after each import/refresh)
+13. ✅ **Components** — `position_table.py` (with cash row), `charts.py`, `performance_metrics.py`
+14. ✅ **Views** — `portfolio_view.py` (Tab 1: TASE, Tab 2: US), `merged_view.py` (Tab 3)
+15. ✅ **Options tab** — `options_view.py` (Tab 4: open options positions)
+16. ✅ **Performance tab** — `performance_view.py` (Tab 5: historical returns + benchmarks), `benchmark_fetcher.py`
+17. ✅ **App entry point** — `app.py` (5 tabs + sidebar uploader)
+18. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
 
 ---
 
@@ -642,33 +734,46 @@ cp .env.example .env        # add TWELVEDATA_API_KEY
 streamlit run app.py
 
 # Structure
-[ ] DB created at data/portfolio.db with 9 tables
-[ ] Trans_Input file parsed on first run; all 2065 rows ingested
+[x] DB created at data/portfolio.db with 11 tables
+[x] Trans_Input file parsed on first run; all 2065 rows ingested
 
 # Tab 1 — TASE (₪)
-[ ] Full-width NIS positions with cash card visible
-[ ] NIS cash ≈ last 'balance' value in original Excel (יתרה שקלית column)
+[x] Full-width NIS positions with cash card visible
+[x] NIS cash ≈ last 'balance' value in original Excel (יתרה שקלית column)
 
 # Tab 2 — US ($)
-[ ] Full-width USD positions with cash card visible
+[x] Full-width USD positions with cash card visible
 
 # Tab 3 — Merged (₪)
-[ ] All positions shown in ₪
-[ ] USD position cost uses historical FX rate (not today's rate)
-[ ] USD position value uses FX rate on reference date
-[ ] NIS cash + USD cash (converted) both displayed
-[ ] Historical USD/ILS rate for reference date shown
+[x] All positions shown in ₪
+[x] USD position cost uses historical FX rate (not today's rate)
+[x] USD position value uses FX rate on reference date
+[x] NIS cash + USD cash (converted) both displayed
+[x] Historical USD/ILS rate for reference date shown
+
+# Tab 4 — Options
+[x] NIS and USD options positions displayed separately
+[x] Empty state handled gracefully
+
+# Tab 5 — Performance
+[x] 4 metric cards: Total Return, CAGR, Max Drawdown, Sharpe Ratio
+[x] Benchmark captions for S&P 500 and TA-125
+[x] Portfolio Value Over Time chart (₪)
+[x] Cumulative Returns vs Benchmarks chart (base 100)
+[x] Stabilization detection skips initial build-up period
+[x] Historical data only — no forward-looking projections
+[x] Benchmark data cached in benchmark_cache table
 
 # Import
-[ ] Upload same Excel via sidebar → "0 new rows, 2065 duplicates"
-[ ] Upload a new Excel with 10 extra rows → "10 new, 2065 duplicates"
-[ ] import_log shows both uploads
+[x] Upload same Excel via sidebar → "0 new rows, 2065 duplicates"
+[x] Upload a new Excel with 10 extra rows → "10 new, 2065 duplicates"
+[x] import_log shows both uploads
 
 # History
-[ ] daily_portfolio_state has one row per unique transaction date (~750 rows)
-[ ] realized_trades has one row per sell transaction
+[x] daily_portfolio_state has one row per unique transaction date (~750 rows)
+[x] realized_trades has one row per sell transaction
 
 # Prices
-[ ] TASE stock (e.g. 445015/מטריקס) price displayed in shekels (not agorot)
-[ ] US stock (e.g. AAPL) price displayed in dollars
+[x] TASE stock (e.g. 445015/מטריקס) price displayed in shekels (not agorot)
+[x] US stock (e.g. AAPL) price displayed in dollars
 ```

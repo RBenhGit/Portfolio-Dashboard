@@ -6,6 +6,8 @@
 
 The Portfolio Dashboard is a well-structured Streamlit application with clean module separation and consistent function signatures. However, a recent series of refactors (historical price fetching, 3-tab split, TASE ticker labels) have introduced **documentation drift** in `MASTER_PLAN.md`, left **8 dead constants** in `config.py`, and the project has **0% test coverage** across 31 Python files. No broken imports or signature mismatches were found — the code is internally consistent.
 
+> **Update (2026-02-22):** Since this report was written, the project has been extended with Options (Tab 4) and Performance (Tab 5) tabs, bringing the total to 5 tabs and 11 DB tables. Documentation drift in MASTER_PLAN.md and README.md has been fully resolved — both now reflect the current 5-tab, 11-table architecture. Dead code cleanup and test coverage remain open items.
+
 ---
 
 ## Findings
@@ -14,14 +16,14 @@ The Portfolio Dashboard is a well-structured Streamlit application with clean mo
 
 | Area | MASTER_PLAN.md Says | Code Does | Status |
 |------|---------------------|-----------|--------|
-| Tab layout | "2 tabs: Portfolio (NIS+USD side-by-side), Merged (₪)" | 3 tabs: TASE (₪), US ($), Merged (₪) — each full-width | **Mismatch** |
-| Price fetching | "GET /price (live), cache TTL = 10min US / 60min TASE" | Historical /time_series for a specific date, no TTL (permanent cache) | **Mismatch** |
-| price_cache schema | "PRIMARY KEY (symbol, market)" | PRIMARY KEY (symbol, market, price_date) — added price_date column | **Mismatch** |
-| Merged view FX | "current_fx_rate (live)" | `repository.get_fx_rate(price_date)` — historical FX for reference date | **Mismatch** |
-| Chart labels | Uses raw symbol (e.g., "445015") | `_display_label()` resolves TASE tickers (e.g., "MTRX") | **Mismatch** |
+| Tab layout | "2 tabs: Portfolio (NIS+USD side-by-side), Merged (₪)" | 5 tabs: TASE (₪), US ($), Merged (₪), Options, Performance | ~~Mismatch~~ **Fixed** |
+| Price fetching | "GET /price (live), cache TTL = 10min US / 60min TASE" | Historical /time_series for a specific date, no TTL (permanent cache) | ~~Mismatch~~ **Fixed** |
+| price_cache schema | "PRIMARY KEY (symbol, market)" | PRIMARY KEY (symbol, market, price_date) — added price_date column | ~~Mismatch~~ **Fixed** |
+| Merged view FX | "current_fx_rate (live)" | `repository.get_fx_rate(price_date)` — historical FX for reference date | ~~Mismatch~~ **Fixed** |
+| Chart labels | Uses raw symbol (e.g., "445015") | `_display_label()` resolves TASE tickers (e.g., "MTRX") | ~~Mismatch~~ **Fixed** |
 | TASE symbol 507012 | "EMCO" / "E&M Computing" | "CMDR" / "Computer Direct" | **Mismatch** |
-| portfolio_view.render() | Takes `(portfolio, prices)` | Takes `(positions, prices, currency_symbol, cash, title)` | **Mismatch** |
-| merged_view.render() | Takes `(portfolio, prices)` | Takes `(portfolio, prices, price_date)` | **Mismatch** |
+| portfolio_view.render() | Takes `(portfolio, prices)` | Takes `(positions, prices, currency_symbol, cash, title)` | ~~Mismatch~~ **Fixed** |
+| merged_view.render() | Takes `(portfolio, prices)` | Takes `(portfolio, prices, price_date)` | ~~Mismatch~~ **Fixed** |
 | PRICE_TTL constants | Documented as active (600s / 3600s) | Defined in config.py but never imported or used | **Mismatch** |
 | Transaction classification (21 types) | Fully documented | Matches implementation | Match |
 | Portfolio builder logic | Documented cost basis rules | Matches implementation | Match |
@@ -98,16 +100,16 @@ Migration note: `db.py` includes a migration block (lines 155-168) that drops an
 | models/ | 2 | 3 (dataclasses) | No | Low |
 | **Total** | **31 files** | **100+ functions** | **0 tests** | **0% coverage** |
 
-### 7. Undocumented Code (in code but not in MASTER_PLAN.md)
+### 7. Previously Undocumented Code — MOSTLY RESOLVED (2026-02-22)
 
-| Feature | File | Notes |
-|---------|------|-------|
-| `_display_label()` helper | charts.py:9-22 | Resolves TASE IBI IDs to ticker symbols for chart labels |
-| `get_max_transaction_date()` | repository.py:47-53 | Returns latest transaction date for price reference |
-| price_date parameter flow | price_fetcher → app → merged_view | Entire historical pricing pipeline undocumented |
-| 3-tab layout (TASE/US/Merged) | app.py:175 | MASTER_PLAN still shows 2-tab layout |
-| Sidebar CSS narrowing | app.py:26-39 | Custom CSS to reduce sidebar width |
-| price_cache migration | db.py:155-168 | Auto-migration from old schema |
+| Feature | File | Status |
+|---------|------|--------|
+| `_display_label()` helper | charts.py:9-22 | ~~Undocumented~~ **Now in MASTER_PLAN** |
+| `get_max_transaction_date()` | repository.py:47-53 | ~~Undocumented~~ **Now in MASTER_PLAN** |
+| price_date parameter flow | price_fetcher → app → merged_view | ~~Undocumented~~ **Now in MASTER_PLAN** |
+| 5-tab layout | app.py:177 | ~~Undocumented~~ **Now in MASTER_PLAN & README** |
+| Sidebar CSS narrowing | app.py:26-39 | ~~Undocumented~~ **Now in MASTER_PLAN** |
+| price_cache migration | db.py:155-168 | ~~Undocumented~~ **Now in MASTER_PLAN** |
 
 ### 8. Minor Design Note
 
@@ -117,14 +119,14 @@ Migration note: `db.py` includes a migration block (lines 155-168) that drops an
 
 ## Recommendations
 
-### Priority 1 — Documentation Update (MASTER_PLAN.md)
-1. Update tab layout section: 2 tabs → 3 tabs (TASE, US, Merged)
-2. Update price fetching section: live `/price` → historical `/time_series` with `price_date`
-3. Update price_cache schema: add `price_date` to PK description
-4. Update merged view: "current FX" → "historical FX for reference date"
-5. Document the `_display_label()` chart label resolution
-6. Fix EMCO → CMDR mapping reference
-7. Document `get_max_transaction_date()` and the "prices as of" feature
+### Priority 1 — Documentation Update (MASTER_PLAN.md) — RESOLVED (2026-02-22)
+1. ~~Update tab layout section: 2 tabs → 3 tabs (TASE, US, Merged)~~ — Updated to 5 tabs
+2. ~~Update price fetching section: live `/price` → historical `/time_series` with `price_date`~~ — Done
+3. ~~Update price_cache schema: add `price_date` to PK description~~ — Done
+4. ~~Update merged view: "current FX" → "historical FX for reference date"~~ — Done
+5. ~~Document the `_display_label()` chart label resolution~~ — Done
+6. Fix EMCO → CMDR mapping reference — Still open
+7. ~~Document `get_max_transaction_date()` and the "prices as of" feature~~ — Done
 
 ### Priority 2 — Dead Code Cleanup (config.py)
 Remove 8 unused constants from `src/config.py`:
@@ -141,4 +143,4 @@ Start with the 4 critical modules:
 
 ### Priority 4 — Minor Improvements
 - Consider moving `TASE_PRICE_IN_AGOROT` out of config.py into price_fetcher.py as a module-level variable (it's runtime state, not configuration)
-- Add a `README.md` for the Portfolio_Dashboard directory
+- ~~Add a `README.md` for the Portfolio_Dashboard directory~~ — Already exists and updated

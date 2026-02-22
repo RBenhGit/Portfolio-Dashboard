@@ -145,7 +145,16 @@ def build(trigger: str = "startup") -> dict:
 
         if direction == "add":
             # BUY / DEPOSIT / BONUS / SPLIT-ADD
-            if effect == "stock_split":
+            if effect == "option_expiry" and pos.quantity > -_EPS:
+                # Expiry credit for an option whose original sell is not in our
+                # data (sold before the reporting period).  Skip to avoid
+                # creating a phantom LONG position.
+                logger.debug(
+                    "Skipping orphan option expiry credit %s qty=%.4f on %s "
+                    "(no prior short position)", sym, qty_abs, date,
+                )
+                continue
+            elif effect == "stock_split":
                 # Split: ratio = new_qty / current_qty → revalue avg_cost
                 if pos.quantity > _EPS:
                     ratio = (pos.quantity + qty_abs) / pos.quantity
@@ -215,14 +224,15 @@ def build(trigger: str = "startup") -> dict:
     if current_date:
         _record_state(current_date)
 
-    # Extract option positions (any with non-zero quantity, including short/negative)
+    # Extract option positions — keep ALL (including closed with qty ≈ 0)
+    # so the UI can offer an "All / Open only" toggle.
     options_nis = {
         k: v for k, v in positions_nis.items()
-        if is_option(k, v.security_name) and abs(v.quantity) > _EPS
+        if is_option(k, v.security_name)
     }
     options_usd = {
         k: v for k, v in positions_usd.items()
-        if is_option(k, v.security_name) and abs(v.quantity) > _EPS
+        if is_option(k, v.security_name)
     }
 
     # Filter: keep only real non-option positions with positive quantity

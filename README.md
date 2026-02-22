@@ -24,12 +24,14 @@ This dashboard was built to:
 
 | Feature | Description |
 |---------|-------------|
-| **Three portfolio tabs** | TASE (₪), US ($), and Merged (all in ₪) |
+| **Five portfolio tabs** | TASE (₪), US ($), Merged (all in ₪), Options, and Performance |
 | **Position tracking** | Quantity, average cost, market price, market value, unrealized P&L (absolute and %) |
 | **Cash balances** | NIS cash (from IBI's running balance) and USD cash (accumulated from forex transactions) |
 | **Allocation charts** | Interactive donut pie charts showing market value distribution |
 | **P&L charts** | Horizontal bar charts with color-coded gains (green) and losses (red) per position |
-| **Merged view** | All positions converted to ₪ using current FX rate, with historical cost basis preserved |
+| **Merged view** | All positions converted to ₪ using historical FX rate for the reference date, with historical cost basis preserved |
+| **Options view** | Open options positions separated by currency (NIS/USD), with long/short classification |
+| **Performance analytics** | Total Return, CAGR, Max Drawdown, Sharpe Ratio with S&P 500 and TA-125 benchmark comparison |
 | **Sidebar controls** | Upload new Excel files, force re-parse, refresh prices, view API status and import history |
 | **Realized P&L** | Per-trade gain/loss tracking for every sell transaction |
 | **Daily portfolio state** | Historical snapshots of invested amount, cash, and cumulative P&L for each transaction date |
@@ -61,22 +63,26 @@ This dashboard was built to:
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Streamlit Dashboard (app.py)                           │
-│  portfolio_view, merged_view, charts, position_table    │
-├─────────────────────────────────────────────────────────┤
-│  Portfolio Engine                                       │
-│  builder.py (sequential build) + price_fetcher.py       │
-├─────────────────────────────────────────────────────────┤
-│  Classification & Enrichment                            │
-│  ibi_classifier.py (21 types) + symbol_mapper.py        │
-├─────────────────────────────────────────────────────────┤
-│  Data Access (repository.py) + SQLite (db.py, 9 tables) │
-├─────────────────────────────────────────────────────────┤
-│  Input (excel_reader.py) + FX (fx_fetcher.py)           │
-├─────────────────────────────────────────────────────────┤
-│  Domain Models: Transaction, Position (dataclasses)     │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Streamlit Dashboard (app.py) — 5 tabs                       │
+│  portfolio_view, merged_view, options_view, performance_view │
+│  charts, position_table, performance_metrics                 │
+├──────────────────────────────────────────────────────────────┤
+│  Portfolio Engine                                            │
+│  builder.py (sequential build) + price_fetcher.py            │
+├──────────────────────────────────────────────────────────────┤
+│  Classification & Enrichment                                 │
+│  ibi_classifier.py (21 types) + symbol_mapper.py             │
+├──────────────────────────────────────────────────────────────┤
+│  Market Data                                                 │
+│  price_fetcher.py + fx_fetcher.py + benchmark_fetcher.py     │
+├──────────────────────────────────────────────────────────────┤
+│  Data Access (repository.py) + SQLite (db.py, 11 tables)     │
+├──────────────────────────────────────────────────────────────┤
+│  Input (excel_reader.py) + FX (fx_fetcher.py)                │
+├──────────────────────────────────────────────────────────────┤
+│  Domain Models: Transaction, Position (dataclasses)          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
@@ -107,7 +113,12 @@ Portfolio Builder ── Sequential pass over all transactions:
 Price Fetcher ──── Fetch closing prices for open positions
     │                Primary: Twelvedata │ Fallback: yfinance
     ▼
-Streamlit Dashboard ── Render 3 tabs with metrics, tables, and charts
+Streamlit Dashboard ── Render 5 tabs with metrics, tables, and charts
+    Tab 1: TASE (₪) — NIS positions
+    Tab 2: US ($) — USD positions
+    Tab 3: Merged (₪) — all positions in shekels
+    Tab 4: Options — open options positions
+    Tab 5: Performance — historical returns vs benchmarks
 ```
 
 ### Key Algorithms
@@ -120,20 +131,21 @@ Streamlit Dashboard ── Render 3 tabs with metrics, tables, and charts
 
 **TASE Symbol Resolution** — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution follows: runtime cache → DB cache → static map (7 known stocks) → Twelvedata symbol_search API → fallback to None.
 
-### Database Schema (SQLite, 9 tables)
+### Database Schema (SQLite, 11 tables)
 
 | Table | Purpose |
 |-------|---------|
 | `transactions` | Classified transaction ledger (26 columns, deduped by `row_hash`) |
 | `fx_rates` | Historical USD/ILS rates by date |
 | `price_cache` | Market prices by (symbol, market, price_date) |
+| `metadata` | App-wide key-value store (file mtime, last parse, etc.) |
 | `daily_portfolio_state` | End-of-day portfolio snapshot (invested, cash, P&L) |
 | `realized_trades` | Per-sell trade details with P&L |
 | `portfolio_snapshots` | Point-in-time portfolio summaries |
 | `position_snapshots` | Holdings within each snapshot |
 | `tase_symbol_map` | IBI numeric ID → Twelvedata/yfinance ticker cache |
 | `import_log` | Import history (file, timestamp, rows added/duped) |
-| `metadata` | App-wide key-value store |
+| `benchmark_cache` | S&P 500 and TA-125 index prices for performance comparison |
 
 ### Technology Stack
 
@@ -205,9 +217,14 @@ Open `http://localhost:8501` in your browser.
 
 ```
 Portfolio_Dashboard/
-├── app.py                          # Streamlit entry point
+├── app.py                          # Streamlit entry point (5 tabs)
 ├── requirements.txt                # Python dependencies
 ├── .env                            # API keys (not in repo)
+├── docs/                           # Project documentation
+│   ├── performance-tab-why-how-what.md
+│   ├── Insufficient_Shares_Investigation_2026-02-20.md
+│   ├── Project_ReEvaluation_2026-02-20.md
+│   └── 2000_api_guide_eng.pdf      # IBI API reference
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx       # IBI broker export
 ├── data/
@@ -225,18 +242,22 @@ Portfolio_Dashboard/
     ├── market/
     │   ├── symbol_mapper.py        # TASE ID → ticker resolution
     │   ├── price_fetcher.py        # Market price fetching & caching
-    │   └── fx_fetcher.py           # USD/ILS historical rate fetching
+    │   ├── fx_fetcher.py           # USD/ILS historical rate fetching
+    │   └── benchmark_fetcher.py    # S&P 500 & TA-125 via yfinance + cache
     ├── portfolio/
     │   ├── ingestion.py            # Full pipeline orchestration
     │   └── builder.py              # Sequential portfolio build loop
     ├── database/
-    │   ├── db.py                   # SQLite schema (9 tables, WAL mode)
+    │   ├── db.py                   # SQLite schema (11 tables, WAL mode)
     │   └── repository.py           # Data access layer (CRUD)
     └── dashboard/
         ├── components/
         │   ├── charts.py           # Plotly pie & bar charts
-        │   └── position_table.py   # Styled position DataFrame
+        │   ├── position_table.py   # Styled position DataFrame
+        │   └── performance_metrics.py # CAGR, Sharpe, max drawdown calculations
         └── views/
             ├── portfolio_view.py   # Single-market tab (TASE or US)
-            └── merged_view.py      # Combined all-in-₪ view
+            ├── merged_view.py      # Combined all-in-₪ view
+            ├── options_view.py     # Open options positions (NIS + USD)
+            └── performance_view.py # Historical returns + benchmark comparison
 ```

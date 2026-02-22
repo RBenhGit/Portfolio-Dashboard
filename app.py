@@ -197,19 +197,4 @@ with tab_options:
     options_view.render(options_nis, options_usd)
 
 with tab_performance:
-    # Compute current live total value in NIS for the final data point
-    current_mv_nis = None
-    if prices:
-        fx = repository.get_fx_rate(price_date) or 3.7
-        mv_nis = sum(
-            (prices.get(s) or 0) * p.quantity for s, p in positions_nis.items()
-        )
-        mv_usd_in_nis = sum(
-            (prices.get(s) or 0) * p.quantity * fx for s, p in positions_usd.items()
-        )
-        current_mv_nis = (
-            mv_nis + mv_usd_in_nis
-            + portfolio.get("nis_cash", 0.0)
-            + portfolio.get("usd_cash", 0.0) * fx
-        )
-    performance_view.render(current_market_value_nis=current_mv_nis)
+    performance_view.render()
