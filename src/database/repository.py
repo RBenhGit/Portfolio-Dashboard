@@ -214,6 +214,58 @@ def clear_daily_portfolio_state() -> None:
     conn.close()
 
 
+def get_daily_portfolio_states() -> list[sqlite3.Row]:
+    """Return all daily_portfolio_state rows ordered by date."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM daily_portfolio_state ORDER BY date ASC"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# ── Benchmark cache ──────────────────────────────────────────────────────────
+
+def upsert_benchmark_prices(symbol: str, prices: dict[str, float]) -> None:
+    """Cache benchmark daily closes. prices = {date_str: close_price}."""
+    if not prices:
+        return
+    conn = get_connection()
+    now = datetime.now(timezone.utc).isoformat()
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO benchmark_cache "
+            "(symbol, date, close, fetched_at) VALUES (?,?,?,?)",
+            [(symbol, d, p, now) for d, p in prices.items()],
+        )
+    conn.close()
+
+
+def get_benchmark_prices(symbol: str) -> dict[str, float]:
+    """Return {date: close} for a cached benchmark."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date, close FROM benchmark_cache WHERE symbol=? ORDER BY date",
+        (symbol,),
+    ).fetchall()
+    conn.close()
+    return {r["date"]: r["close"] for r in rows}
+
+
+def get_benchmark_date_range(symbol: str) -> tuple[str | None, str | None]:
+    """Return (min_date, max_date) for cached benchmark data."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT MIN(date) as min_d, MAX(date) as max_d "
+        "FROM benchmark_cache WHERE symbol=?",
+        (symbol,),
+    ).fetchone()
+    conn.close()
+    if row and row["min_d"]:
+        return row["min_d"], row["max_d"]
+    return None, None
+
+
 # ── Snapshots ─────────────────────────────────────────────────────────────────
 
 def save_snapshot(summary: dict, positions: list[dict]) -> int:

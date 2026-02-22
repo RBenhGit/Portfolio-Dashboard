@@ -45,7 +45,7 @@ from src.database import repository
 from src.portfolio.ingestion import ingest
 from src.portfolio import builder
 from src.market.price_fetcher import fetch_prices_for_positions, check_twelvedata_status
-from src.dashboard.views import portfolio_view, merged_view
+from src.dashboard.views import portfolio_view, merged_view, options_view, performance_view
 
 
 # ── Startup: ensure DB exists and Excel is parsed ─────────────────────────────
@@ -160,6 +160,8 @@ st.title("📈 IBI Portfolio Dashboard")
 portfolio = _get_portfolio()
 positions_nis = portfolio.get("positions_nis", {})
 positions_usd = portfolio.get("positions_usd", {})
+options_nis = portfolio.get("options_nis", {})
+options_usd = portfolio.get("options_usd", {})
 
 # Determine the reference date: closing price on the last transaction date
 price_date = repository.get_max_transaction_date() or ""
@@ -172,7 +174,9 @@ prices = _get_prices(
     price_date,
 )
 
-tab_tase, tab_us, tab_merged = st.tabs(["🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)"])
+tab_tase, tab_us, tab_merged, tab_options, tab_performance = st.tabs(
+    ["🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options", "📊 Performance"]
+)
 
 with tab_tase:
     portfolio_view.render(
@@ -188,3 +192,24 @@ with tab_us:
 
 with tab_merged:
     merged_view.render(portfolio, prices, price_date)
+
+with tab_options:
+    options_view.render(options_nis, options_usd)
+
+with tab_performance:
+    # Compute current live total value in NIS for the final data point
+    current_mv_nis = None
+    if prices:
+        fx = repository.get_fx_rate(price_date) or 3.7
+        mv_nis = sum(
+            (prices.get(s) or 0) * p.quantity for s, p in positions_nis.items()
+        )
+        mv_usd_in_nis = sum(
+            (prices.get(s) or 0) * p.quantity * fx for s, p in positions_usd.items()
+        )
+        current_mv_nis = (
+            mv_nis + mv_usd_in_nis
+            + portfolio.get("nis_cash", 0.0)
+            + portfolio.get("usd_cash", 0.0) * fx
+        )
+    performance_view.render(current_market_value_nis=current_mv_nis)

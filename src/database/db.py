@@ -149,6 +149,14 @@ CREATE TABLE IF NOT EXISTS tase_symbol_map (
     name        TEXT,
     updated_at  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS benchmark_cache (
+    symbol     TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    close      REAL NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, date)
+);
         """)
 
     # ── Migrations ────────────────────────────────────────────────────────────

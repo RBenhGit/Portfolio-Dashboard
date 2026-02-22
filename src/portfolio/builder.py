@@ -215,6 +215,16 @@ def build(trigger: str = "startup") -> dict:
     if current_date:
         _record_state(current_date)
 
+    # Extract option positions (any with non-zero quantity, including short/negative)
+    options_nis = {
+        k: v for k, v in positions_nis.items()
+        if is_option(k, v.security_name) and abs(v.quantity) > _EPS
+    }
+    options_usd = {
+        k: v for k, v in positions_usd.items()
+        if is_option(k, v.security_name) and abs(v.quantity) > _EPS
+    }
+
     # Filter: keep only real non-option positions with positive quantity
     positions_nis = {
         k: v for k, v in positions_nis.items()
@@ -228,6 +238,8 @@ def build(trigger: str = "startup") -> dict:
     return {
         "positions_nis": positions_nis,
         "positions_usd": positions_usd,
+        "options_nis": options_nis,
+        "options_usd": options_usd,
         "nis_cash": nis_cash,
         "usd_cash": usd_cash,
         "cum_realized_pnl_nis": cum_realized_pnl_nis,
@@ -240,6 +252,8 @@ def _empty_summary() -> dict:
     return {
         "positions_nis": {},
         "positions_usd": {},
+        "options_nis": {},
+        "options_usd": {},
         "nis_cash": 0.0,
         "usd_cash": 0.0,
         "cum_realized_pnl_nis": 0.0,
