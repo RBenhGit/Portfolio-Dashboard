@@ -14,7 +14,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def create_schema() -> None:
-    """Create all 9 tables if they don't exist."""
+    """Create all 11 tables if they don't exist."""
     conn = get_connection()
     with conn:
         conn.executescript("""

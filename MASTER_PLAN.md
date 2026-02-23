@@ -7,11 +7,12 @@ by processing all IBI broker transactions from `Trans_Input/Transactions_IBI.xls
 May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction project.
 
 **Key drivers:**
-- Tab 1: TASE (₪) — full-width NIS positions
-- Tab 2: US ($) — full-width USD positions
-- Tab 3: Merged portfolio (all in ₪ using historically-correct FX rates)
-- Tab 4: Options — open options positions (NIS + USD)
-- Tab 5: Performance — historical returns with benchmark comparison (S&P 500, TA-125)
+- Tab 1: Statistics — portfolio summary, performance metrics, trading activity, risk & diversification
+- Tab 2: TASE (₪) — full-width NIS positions
+- Tab 3: US ($) — full-width USD positions
+- Tab 4: Merged portfolio (all in ₪ using historically-correct FX rates)
+- Tab 5: Options — open options positions (NIS + USD)
+- Tab 6: Performance — historical returns with benchmark comparison (S&P 500, TA-125)
 - All 21 IBI transaction types handled correctly, including stock splits
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
@@ -37,7 +38,7 @@ May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction
 
 **Implementation rule:** All stored and displayed TASE prices must be in **shekels**. The ÷100 conversion is applied at the boundary (ingestion for IBI data, price_fetcher for API data), never downstream. USD stock prices are always in dollars — no conversion needed.
 
-**Verification step (Task 11):** When implementing `price_fetcher.py`, fetch a known TASE stock (e.g. 445015/Matrix) and compare the returned value to the known market price. If the API returns ~17000 for a stock trading at ~170₪, it's agorot → apply ÷100. Log the result and set a `TASE_PRICE_IN_AGOROT` config flag.
+**Verification step (Task 11):** When implementing `price_fetcher.py`, fetch a known TASE stock (e.g. 445015/Matrix) and compare the returned value to the known market price. If the API returns ~17000 for a stock trading at ~170₪, it's agorot → apply ÷100. The agorot ÷100 conversion is hardcoded in `ibi_classifier.py` (`BaseClassifier.normalize_price`) and `price_fetcher.py`, not controlled by a config flag.
 
 ---
 
@@ -70,11 +71,12 @@ src/market/fx_fetcher.py           ← Twelvedata historical USD/ILS
         │
         ▼
 app.py → Streamlit
-    Tab 1: TASE (₪) — full-width NIS positions
-    Tab 2: US ($) — full-width USD positions
-    Tab 3: Merged (₪) — all positions converted to shekels
-    Tab 4: Options — open options positions
-    Tab 5: Performance — historical returns vs benchmarks
+    Tab 1: Statistics — portfolio summary, performance, trading, risk
+    Tab 2: TASE (₪) — full-width NIS positions
+    Tab 3: US ($) — full-width USD positions
+    Tab 4: Merged (₪) — all positions converted to shekels
+    Tab 5: Options — open options positions
+    Tab 6: Performance — historical returns vs benchmarks
 
 src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 ```
@@ -85,7 +87,7 @@ src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 
 ```
 Portfolio_Dashboard/
-├── app.py                              # Streamlit entry point (5 tabs)
+├── app.py                              # Streamlit entry point (6 tabs)
 ├── MASTER_PLAN.md                      # This file — architecture & implementation plan
 ├── README.md                           # Project overview
 ├── requirements.txt
@@ -94,7 +96,6 @@ Portfolio_Dashboard/
 ├── docs/                               # Project documentation
 │   ├── performance-tab-why-how-what.md # Performance tab deep-dive
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
-│   ├── Project_ReEvaluation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf          # IBI API reference
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx           # Source (read-only)
@@ -122,6 +123,8 @@ Portfolio_Dashboard/
     │   └── symbol_mapper.py           # Market detection, TASE symbol handling
     └── dashboard/
         ├── views/
+        │   ├── statistics_view.py     # render(portfolio, prices, price_date) — summary, performance,
+        │   │                          #   trading activity, risk & diversification (Tab 1)
         │   ├── portfolio_view.py      # render(positions, prices, currency_symbol, cash, title)
         │   │                          #   Renders ONE market at full width (called per tab)
         │   ├── merged_view.py         # render(portfolio, prices, price_date) — all in ₪
@@ -340,6 +343,12 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 > If `execution_price == 0` and `security_symbol` matches an existing position → treat as **stock split** (apply ratio = quantity / current_position_qty, adjust avg_cost).
 > If execution_price > 0 → treat as **bonus shares** (add shares at 0 cost).
 
+### Implicit Behaviors
+
+**Orphan option expiry skip** (`builder.py`): When an option expiry credit (`הפקדה פקיעה`) arrives for a symbol with no prior short position (i.e. `pos.quantity > -0.001`), the builder silently skips it. This prevents creating phantom long positions for options whose original short sell occurred before the reporting period.
+
+**Stabilization detection** (`performance_view.py`, `statistics_view.py`): When computing performance metrics from `daily_portfolio_state`, data points where the daily percentage change exceeds 10% (`pct_change().abs() > 0.10`) are filtered out. This removes the initial portfolio build-up period where large deposits would distort return calculations.
+
 ### Phantom Detection (exclude from portfolio entirely)
 
 - `security_symbol` starts with "999" → IBI tax accounts (9993983, 9993975, 9993971)
@@ -406,9 +415,9 @@ for tx in sorted_transactions:
             del positions[tx.security_symbol]  # fully closed
 
     elif tx.effect == 'stock_split':
-        ratio = tx.share_quantity_abs / pos.quantity
+        ratio = (pos.quantity + tx.share_quantity_abs) / pos.quantity
         pos.quantity *= ratio
-        pos.average_cost /= ratio
+        # total_invested unchanged; avg_cost = total_invested / quantity (drops automatically)
         # total_invested and total_invested_nis unchanged
 
     # Record daily state at date boundary
@@ -469,16 +478,50 @@ Market detection (in priority order):
 
 ---
 
-## Dashboard Layout (Streamlit — 5 Tabs)
+## Dashboard Layout (Streamlit — 6 Tabs)
 
-### Tab 1: TASE (₪) — full-width NIS positions
+### Tab 1: Statistics — portfolio-wide analytics
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
-├───────────┬──────────┬────────────┬────────────┬──────────────────────────────────┤
-│  TASE (₪) │  US ($)  │ Merged (₪) │  Options   │  Performance                    │
-├───────────┴──────────┴────────────┴────────────┴──────────────────────────────────┤
+├────────────┬───────────┬──────────┬────────────┬──────────┬───────────────────────┤
+│ Statistics │ TASE (₪)  │  US ($)  │ Merged (₪) │ Options  │ Performance           │
+├────────────┴───────────┴──────────┴────────────┴──────────┴───────────────────────┤
+│  ┌──── Portfolio Summary ──────────────────────────────────────────────────┐│
+│  │ [Total Portfolio Value ₪] [Total P&L ₪] [P&L %] [Total Cash ₪]        ││
+│  │ [NIS Stocks] [USD Stocks] [NIS Options] [USD Options] [Total Pos]      ││
+│  │ Asset Allocation donut (stocks + cash; option premiums in cash)         ││
+│  │ Top 5 Gainers | Top 5 Losers (by P&L %)                               ││
+│  ├──── Performance Metrics ────────────────────────────────────────────────┤│
+│  │ [Total Return] [CAGR] [Max Drawdown] [Sharpe Ratio]                    ││
+│  │ S&P 500: Total Return +XX.X% | CAGR +XX.X%                            ││
+│  │ TA-125:  Total Return +XX.X% | CAGR +XX.X%                            ││
+│  ├──── Trading Activity ───────────────────────────────────────────────────┤│
+│  │ [Total Trades] [Realized P&L ₪] [Win Rate] [Avg Holding Period]        ││
+│  │ Most Traded Symbols bar chart (top 5)                                   ││
+│  ├──── Risk & Diversification ─────────────────────────────────────────────┤│
+│  │ [NIS Exposure %] [USD Exposure %] [Largest Position] [Total Positions] ││
+│  │ Asset Allocation pie | Market Concentration pie                         ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `statistics_view.render(portfolio, prices, price_date)`. Key design decisions:
+
+- **Portfolio value = stock market value only** — option premiums from short sales are already reflected in cash; not double-counted
+- **Performance metrics** — reuses same computation as Performance tab (daily_portfolio_state → stabilization detection → Total Return, CAGR, Max Drawdown, Sharpe)
+- **Trading activity** — derived from `realized_trades` (win/loss) and `transactions` (trade count, most traded, avg holding period)
+- **Risk metrics** — NIS/USD market concentration, largest single-position exposure as % of portfolio
+
+### Tab 2: TASE (₪) — full-width NIS positions
+
+```
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
+├────────────┬───────────┬──────────┬────────────┬──────────┬───────────────────────┤
+│ Statistics │ TASE (₪)  │  US ($)  │ Merged (₪) │ Options  │ Performance           │
+├────────────┴───────────┴──────────┴────────────┴──────────┴───────────────────────┤
 │  ┌──── TASE Account (₪) ─────────────────────────────────────────────────┐│
 │  │ [Invested] [Market] [P&L] [P&L%]                                     ││
 │  │ [Cash: ₪ XXX]                                                        ││
@@ -490,7 +533,7 @@ Market detection (in priority order):
 
 Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, title)` — called once per market tab, each at full width.
 
-### Tab 2: US ($) — full-width USD positions
+### Tab 3: US ($) — full-width USD positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -503,7 +546,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Tab 3: Merged Portfolio (all in ₪)
+### Tab 4: Merged Portfolio (all in ₪)
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -530,7 +573,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 - `USD position value (₪)` = `quantity × price_usd × fx_rate_on_reference_date`
 - `USD cash (₪)` = `usd_cash × fx_rate_on_reference_date`
 
-### Tab 4: Options — open options positions
+### Tab 5: Options — open options positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -548,7 +591,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 
 Rendered via `options_view.render(options_nis, options_usd)`. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
 
-### Tab 5: Performance — historical returns with benchmark comparison
+### Tab 6: Performance — historical returns with benchmark comparison
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -608,7 +651,7 @@ YFINANCE_ENABLED=true           # fallback toggle
 - `DB_PATH = "data/portfolio.db"`
 - `TWELVEDATA_API_KEY` — from `.env`
 - `YFINANCE_ENABLED` — fallback toggle from `.env`
-- `TASE_PRICE_IN_AGOROT` — runtime flag for agorot ÷ 100 conversion
+- ~~`TASE_PRICE_IN_AGOROT`~~ — not a config flag; agorot ÷100 is hardcoded in `base_classifier.normalize_price()` and `price_fetcher.py`
 
 ---
 
@@ -650,7 +693,7 @@ repository.save_snapshot()  →  portfolio_snapshots + position_snapshots
 
 ## Historical Analysis
 
-### Performance Tab (implemented — Tab 5)
+### Performance Tab (implemented — Tab 6)
 
 Uses `daily_portfolio_state` to render:
 - **Portfolio Value Over Time** — line chart of cost basis + realized P&L in ₪
@@ -718,11 +761,12 @@ yfinance>=0.2.66
 11. ✅ **Price fetcher** — `src/market/price_fetcher.py` (Twelvedata + yfinance + TASE agorot verification)
 12. ✅ **Snapshot writer** — `repository.save_snapshot()` (called after each import/refresh)
 13. ✅ **Components** — `position_table.py` (with cash row), `charts.py`, `performance_metrics.py`
-14. ✅ **Views** — `portfolio_view.py` (Tab 1: TASE, Tab 2: US), `merged_view.py` (Tab 3)
-15. ✅ **Options tab** — `options_view.py` (Tab 4: open options positions)
-16. ✅ **Performance tab** — `performance_view.py` (Tab 5: historical returns + benchmarks), `benchmark_fetcher.py`
-17. ✅ **App entry point** — `app.py` (5 tabs + sidebar uploader)
-18. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
+14. ✅ **Views** — `portfolio_view.py` (Tab 2: TASE, Tab 3: US), `merged_view.py` (Tab 4)
+15. ✅ **Options tab** — `options_view.py` (Tab 5: open options positions)
+16. ✅ **Performance tab** — `performance_view.py` (Tab 6: historical returns + benchmarks), `benchmark_fetcher.py`
+17. ✅ **App entry point** — `app.py` (6 tabs + sidebar uploader)
+18. ✅ **Statistics tab** — `statistics_view.py` (Tab 1: portfolio summary, performance metrics, trading activity, risk & diversification)
+19. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
 
 ---
 
@@ -737,25 +781,32 @@ streamlit run app.py
 [x] DB created at data/portfolio.db with 11 tables
 [x] Trans_Input file parsed on first run; all 2065 rows ingested
 
-# Tab 1 — TASE (₪)
+# Tab 1 — Statistics
+[x] Portfolio Summary: Total Value, P&L, Cash, position counts, allocation donut, top gainers/losers
+[x] Performance Metrics: Total Return, CAGR, Max Drawdown, Sharpe + benchmark captions
+[x] Trading Activity: trade count, realized P&L, win rate, avg holding period, most traded chart
+[x] Risk & Diversification: NIS/USD exposure, largest position, allocation + concentration pies
+[x] Portfolio value = stocks only (option premiums already in cash, not double-counted)
+
+# Tab 2 — TASE (₪)
 [x] Full-width NIS positions with cash card visible
 [x] NIS cash ≈ last 'balance' value in original Excel (יתרה שקלית column)
 
-# Tab 2 — US ($)
+# Tab 3 — US ($)
 [x] Full-width USD positions with cash card visible
 
-# Tab 3 — Merged (₪)
+# Tab 4 — Merged (₪)
 [x] All positions shown in ₪
 [x] USD position cost uses historical FX rate (not today's rate)
 [x] USD position value uses FX rate on reference date
 [x] NIS cash + USD cash (converted) both displayed
 [x] Historical USD/ILS rate for reference date shown
 
-# Tab 4 — Options
+# Tab 5 — Options
 [x] NIS and USD options positions displayed separately
 [x] Empty state handled gracefully
 
-# Tab 5 — Performance
+# Tab 6 — Performance
 [x] 4 metric cards: Total Return, CAGR, Max Drawdown, Sharpe Ratio
 [x] Benchmark captions for S&P 500 and TA-125
 [x] Portfolio Value Over Time chart (₪)

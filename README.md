@@ -24,14 +24,15 @@ This dashboard was built to:
 
 | Feature | Description |
 |---------|-------------|
-| **Five portfolio tabs** | TASE (₪), US ($), Merged (all in ₪), Options, and Performance |
+| **Six portfolio tabs** | Statistics, TASE (₪), US ($), Merged (all in ₪), Options, and Performance |
 | **Position tracking** | Quantity, average cost, market price, market value, unrealized P&L (absolute and %) |
 | **Cash balances** | NIS cash (from IBI's running balance) and USD cash (accumulated from forex transactions) |
 | **Allocation charts** | Interactive donut pie charts showing market value distribution |
 | **P&L charts** | Horizontal bar charts with color-coded gains (green) and losses (red) per position |
 | **Merged view** | All positions converted to ₪ using historical FX rate for the reference date, with historical cost basis preserved |
 | **Options view** | Open options positions separated by currency (NIS/USD), with long/short classification |
-| **Performance analytics** | Total Return, CAGR, Max Drawdown, Sharpe Ratio with S&P 500 and TA-125 benchmark comparison |
+| **Statistics overview** | Portfolio summary, performance metrics (Total Return, CAGR, Max Drawdown, Sharpe), trading activity (win rate, avg holding period), risk & diversification analysis |
+| **Performance analytics** | Total Return, CAGR, Max Drawdown, Sharpe Ratio with S&P 500 and TA-125 benchmark comparison, portfolio value and cumulative returns charts |
 | **Sidebar controls** | Upload new Excel files, force re-parse, refresh prices, view API status and import history |
 | **Realized P&L** | Per-trade gain/loss tracking for every sell transaction |
 | **Daily portfolio state** | Historical snapshots of invested amount, cash, and cumulative P&L for each transaction date |
@@ -64,8 +65,9 @@ This dashboard was built to:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Streamlit Dashboard (app.py) — 5 tabs                       │
-│  portfolio_view, merged_view, options_view, performance_view │
+│  Streamlit Dashboard (app.py) — 6 tabs                       │
+│  statistics_view, portfolio_view, merged_view,               │
+│  options_view, performance_view                              │
 │  charts, position_table, performance_metrics                 │
 ├──────────────────────────────────────────────────────────────┤
 │  Portfolio Engine                                            │
@@ -113,12 +115,13 @@ Portfolio Builder ── Sequential pass over all transactions:
 Price Fetcher ──── Fetch closing prices for open positions
     │                Primary: Twelvedata │ Fallback: yfinance
     ▼
-Streamlit Dashboard ── Render 5 tabs with metrics, tables, and charts
-    Tab 1: TASE (₪) — NIS positions
-    Tab 2: US ($) — USD positions
-    Tab 3: Merged (₪) — all positions in shekels
-    Tab 4: Options — open options positions
-    Tab 5: Performance — historical returns vs benchmarks
+Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
+    Tab 1: Statistics — portfolio summary, performance, trading activity, risk
+    Tab 2: TASE (₪) — NIS positions
+    Tab 3: US ($) — USD positions
+    Tab 4: Merged (₪) — all positions in shekels
+    Tab 5: Options — open options positions
+    Tab 6: Performance — historical returns vs benchmarks
 ```
 
 ### Key Algorithms
@@ -217,13 +220,12 @@ Open `http://localhost:8501` in your browser.
 
 ```
 Portfolio_Dashboard/
-├── app.py                          # Streamlit entry point (5 tabs)
+├── app.py                          # Streamlit entry point (6 tabs)
 ├── requirements.txt                # Python dependencies
 ├── .env                            # API keys (not in repo)
 ├── docs/                           # Project documentation
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
-│   ├── Project_ReEvaluation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx       # IBI broker export
@@ -256,6 +258,7 @@ Portfolio_Dashboard/
         │   ├── position_table.py   # Styled position DataFrame
         │   └── performance_metrics.py # CAGR, Sharpe, max drawdown calculations
         └── views/
+            ├── statistics_view.py  # Portfolio stats, performance, trading, risk
             ├── portfolio_view.py   # Single-market tab (TASE or US)
             ├── merged_view.py      # Combined all-in-₪ view
             ├── options_view.py     # Open options positions (NIS + USD)
