@@ -1,20 +1,16 @@
 """Single-market portfolio tab renderer."""
 import streamlit as st
+
+from src.dashboard import theme
+from src.dashboard.styles import section_header
 from src.dashboard.components.position_table import render_position_table
-from src.dashboard.components.charts import allocation_pie, pnl_bar
+from src.dashboard.components.charts import allocation_pie, allocation_treemap, pnl_bar
 
 
-def render(positions: dict, prices: dict, currency_symbol: str, cash: float, title: str) -> None:
-    """Render a single-market portfolio tab at full width.
-
-    Args:
-        positions: {symbol: Position} for one market
-        prices: {symbol: current_price}
-        currency_symbol: '₪' or '$'
-        cash: cash balance for this account
-        title: display title for the section header
-    """
-    st.subheader(title)
+def render(positions: dict, prices: dict, currency_symbol: str,
+           cash: float, title: str) -> None:
+    """Render a single-market portfolio tab at full width."""
+    st.markdown(section_header(title), unsafe_allow_html=True)
 
     filtered_prices = {s: prices.get(s) for s in positions}
     invested = sum(p.total_invested for p in positions.values())
@@ -30,13 +26,28 @@ def render(positions: dict, prices: dict, currency_symbol: str, cash: float, tit
     m3.metric("P&L", f"{currency_symbol}{pnl:+,.0f}")
     m4.metric("P&L %", f"{pnl_pct:+.1f}%")
 
-    st.info(f"💰 Cash: **{currency_symbol}{cash:,.2f}**")
+    # Cash card
+    st.markdown(f'''<div class="cash-card">
+        <div class="label">Cash Balance</div>
+        <div class="value">{currency_symbol}{cash:,.2f}</div>
+    </div>''', unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
 
     render_position_table(positions, currency_symbol, filtered_prices)
 
+    # Charts
+    chart_type = st.radio("Chart type", ["Treemap", "Donut"],
+                          horizontal=True, key=f"chart_{title}")
+
     col1, col2 = st.columns(2)
     with col1:
-        fig = allocation_pie(positions, filtered_prices, currency_symbol, f"{title} Allocation")
+        if chart_type == "Treemap":
+            fig = allocation_treemap(positions, filtered_prices, currency_symbol,
+                                     f"{title} Allocation")
+        else:
+            fig = allocation_pie(positions, filtered_prices, currency_symbol,
+                                 f"{title} Allocation")
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 

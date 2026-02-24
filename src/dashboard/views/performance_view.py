@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.dashboard import theme
+from src.dashboard.styles import section_header
 from src.database import repository
 from src.market.benchmark_fetcher import BENCHMARKS, fetch_benchmark
 from src.dashboard.components.performance_metrics import (
@@ -11,10 +13,19 @@ from src.dashboard.components.performance_metrics import (
     compute_max_drawdown,
     compute_sharpe_ratio,
 )
+from src.dashboard.components.charts import (
+    area_chart_with_gradient,
+    drawdown_chart,
+    monthly_returns_heatmap,
+    monthly_returns_bar,
+    rolling_sharpe_chart,
+)
 
 
 def render() -> None:
     """Render the Performance tab."""
+    st.markdown(section_header("Portfolio Performance"), unsafe_allow_html=True)
+
     # ── Build portfolio value series ─────────────────────────────────────────
     states = repository.get_daily_portfolio_states()
     if not states:
@@ -41,7 +52,7 @@ def render() -> None:
     pct_change = portfolio_series.pct_change().abs()
     stable_mask = pct_change <= 0.10
     if stable_mask.any():
-        first_stable = stable_mask.idxmax()  # first True
+        first_stable = stable_mask.idxmax()
         portfolio_series = portfolio_series.loc[first_stable:]
 
     if len(portfolio_series) < 2:
@@ -73,32 +84,30 @@ def render() -> None:
     m3.metric("Max Drawdown", f"{max_dd:.1f}%")
     m4.metric("Sharpe Ratio", f"{sharpe:.2f}")
 
-    # ── Benchmark comparison captions ────────────────────────────────────────
+    # ── Benchmark comparison with colored labels ─────────────────────────────
+    bm_colors = {"S&P 500": theme.BM_SP500, "TA-125": theme.BM_TA125}
     for bm_name, bm_series in benchmarks.items():
         bm_return = (bm_series.iloc[-1] / bm_series.iloc[0] - 1) * 100
         bm_cagr = compute_cagr(bm_series)
-        st.caption(f"{bm_name}: Total Return **{bm_return:+.1f}%** | CAGR **{bm_cagr:+.1f}%**")
+        bm_color = bm_colors.get(bm_name, theme.TEXT_SECONDARY)
+        st.markdown(
+            f'<span style="color:{bm_color};font-weight:600;">{bm_name}</span>'
+            f' Total Return: <b>{bm_return:+.1f}%</b> | CAGR: <b>{bm_cagr:+.1f}%</b>',
+            unsafe_allow_html=True)
 
     st.divider()
 
-    # ── Chart 1: Portfolio Value Over Time ───────────────────────────────────
-    fig_value = go.Figure()
-    fig_value.add_trace(go.Scatter(
-        x=portfolio_series.index,
-        y=portfolio_series.values,
-        mode="lines",
-        name="Portfolio Value",
-        line=dict(color="#1f77b4", width=2),
-    ))
-    fig_value.update_layout(
-        title="Portfolio Value Over Time",
-        yaxis_title="Value (₪)",
-        height=400,
-        margin=dict(t=40, b=20),
-    )
+    # ── Chart 1: Portfolio Value (Area with Gradient) ────────────────────────
+    fig_value = area_chart_with_gradient(portfolio_series, "Portfolio Value",
+                                         theme.BM_PORTFOLIO)
+    fig_value.update_layout(title="Portfolio Value Over Time")
     st.plotly_chart(fig_value, use_container_width=True)
 
-    # ── Chart 2: Cumulative Returns vs Benchmarks ────────────────────────────
+    # ── Chart 2: Drawdown (Underwater Plot) ──────────────────────────────────
+    fig_dd = drawdown_chart(portfolio_series)
+    st.plotly_chart(fig_dd, use_container_width=True)
+
+    # ── Chart 3: Cumulative Returns vs Benchmarks ────────────────────────────
     portfolio_norm = compute_cumulative_returns(portfolio_series)
 
     fig_cum = go.Figure()
@@ -107,20 +116,21 @@ def render() -> None:
         y=portfolio_norm.values,
         mode="lines",
         name="Portfolio",
-        line=dict(color="#1f77b4", width=2.5),
+        line=dict(color=theme.BM_PORTFOLIO, width=2.5),
+        fill="tozeroy",
+        fillcolor="rgba(0, 212, 170, 0.05)",
     ))
 
-    bm_styles = {
-        "S&P 500": dict(color="orange", dash="dash"),
-        "TA-125": dict(color="green", dash="dash"),
+    bm_line_styles = {
+        "S&P 500": dict(color=theme.BM_SP500, dash="dash"),
+        "TA-125": dict(color=theme.BM_TA125, dash="dash"),
     }
     for bm_name, bm_series in benchmarks.items():
-        # Align to portfolio start date
         aligned = bm_series[bm_series.index >= portfolio_series.index[0]]
         if aligned.empty:
             continue
         bm_norm = compute_cumulative_returns(aligned)
-        style = bm_styles.get(bm_name, dict(color="gray", dash="dash"))
+        style = bm_line_styles.get(bm_name, dict(color=theme.NEUTRAL, dash="dash"))
         fig_cum.add_trace(go.Scatter(
             x=bm_norm.index,
             y=bm_norm.values,
@@ -129,7 +139,7 @@ def render() -> None:
             line=style,
         ))
 
-    fig_cum.add_hline(y=100, line_dash="dot", line_color="gray", opacity=0.5)
+    fig_cum.add_hline(y=100, line_dash="dot", line_color=theme.TEXT_MUTED, opacity=0.5)
     fig_cum.update_layout(
         title="Cumulative Returns vs Benchmarks (base 100)",
         yaxis_title="Indexed Value",
@@ -138,6 +148,24 @@ def render() -> None:
         margin=dict(t=40, b=20),
     )
     st.plotly_chart(fig_cum, use_container_width=True)
+
+    # ── Chart 4 & 5: Monthly Returns + Rolling Sharpe (side by side) ────────
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig_monthly = monthly_returns_bar(portfolio_series)
+        if fig_monthly:
+            st.plotly_chart(fig_monthly, use_container_width=True)
+
+    with col2:
+        fig_sharpe = rolling_sharpe_chart(portfolio_series)
+        if fig_sharpe:
+            st.plotly_chart(fig_sharpe, use_container_width=True)
+
+    # ── Chart 6: Monthly Returns Heatmap ─────────────────────────────────────
+    fig_heatmap = monthly_returns_heatmap(portfolio_series)
+    if fig_heatmap:
+        st.plotly_chart(fig_heatmap, use_container_width=True)
 
     st.caption(
         "Portfolio value is based on cost basis + cumulative realized P&L. "

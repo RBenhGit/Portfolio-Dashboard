@@ -1,19 +1,17 @@
 """Options positions tab renderer."""
 import pandas as pd
 import streamlit as st
+
+from src.dashboard import theme
+from src.dashboard.styles import section_header, html_table
 from src.models.position import Position
 
-_QTY_EPS = 0.001  # threshold for "open" position
+_QTY_EPS = 0.001
 
 
 def render(options_nis: dict, options_usd: dict) -> None:
-    """Render the options positions tab.
-
-    Args:
-        options_nis: {symbol: Position} for NIS-denominated options
-        options_usd: {symbol: Position} for USD-denominated options
-    """
-    st.subheader("Options Positions")
+    """Render the options positions tab."""
+    st.markdown(section_header("Options Positions"), unsafe_allow_html=True)
 
     if not options_nis and not options_usd:
         st.info("No option positions.")
@@ -64,19 +62,45 @@ def render(options_nis: dict, options_usd: dict) -> None:
             "Total Invested": round(abs(pos.total_invested), 2),
         })
 
-    df = pd.DataFrame(rows)
+    use_interactive = st.toggle("Interactive table", value=False, key="options_tbl")
 
-    # Style direction column
-    def _color_direction(val):
-        colors = {"LONG": "#2ecc71", "SHORT": "#e74c3c", "CLOSED": "#95a5a6"}
-        color = colors.get(val, "#95a5a6")
-        return f"color: {color}; font-weight: bold"
+    if use_interactive:
+        df = pd.DataFrame(rows)
 
-    styled = df.style.applymap(_color_direction, subset=["Direction"])
-    styled = styled.format({
-        "Quantity": "{:,.0f}",
-        "Avg Cost": "{:,.2f}",
-        "Total Invested": "{:,.2f}",
-    })
+        def _color_direction(val):
+            colors = {"LONG": theme.OPT_LONG, "SHORT": theme.OPT_SHORT,
+                      "CLOSED": theme.OPT_CLOSED}
+            color = colors.get(val, theme.OPT_CLOSED)
+            return f"color: {color}; font-weight: bold"
 
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+        styled = df.style.applymap(_color_direction, subset=["Direction"])
+        styled = styled.format({
+            "Quantity": "{:,.0f}",
+            "Avg Cost": "{:,.2f}",
+            "Total Invested": "{:,.2f}",
+        })
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        headers = ["Symbol", "Name", "Currency", "Direction", "Quantity",
+                    "Avg Cost", "Total Invested"]
+        alignments = ["l", "l", "l", "l", "r", "r", "r"]
+
+        html_rows = []
+        for r in rows:
+            direction = r["Direction"]
+            badge_class = {"LONG": "long", "SHORT": "short", "CLOSED": "closed"}.get(
+                direction, "closed")
+            badge_html = f'<span class="direction-badge {badge_class}">{direction}</span>'
+
+            html_rows.append([
+                r["Symbol"],
+                r["Name"],
+                r["Currency"],
+                badge_html,
+                f'{r["Quantity"]:,.0f}',
+                f'{r["Avg Cost"]:,.2f}',
+                f'{r["Total Invested"]:,.2f}',
+            ])
+
+        st.markdown(html_table(headers, html_rows, alignments),
+                    unsafe_allow_html=True)

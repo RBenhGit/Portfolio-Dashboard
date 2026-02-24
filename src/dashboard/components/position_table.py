@@ -3,10 +3,8 @@ import pandas as pd
 import streamlit as st
 from typing import Optional
 
-
-def _color_pnl(val: float) -> str:
-    color = "#2ecc71" if val >= 0 else "#e74c3c"
-    return f"color: {color}; font-weight: bold"
+from src.dashboard import theme
+from src.dashboard.styles import html_table
 
 
 def render_position_table(
@@ -38,40 +36,62 @@ def render_position_table(
             "Name": pos.security_name or "—",
             "Mkt": pos.market,
             "Qty": pos.quantity,
-            f"Avg Cost ({currency_symbol})": pos.average_cost,
-            f"Price ({currency_symbol})": price,
-            f"Value ({currency_symbol})": market_value,
-            f"P&L ({currency_symbol})": pnl,
+            "Avg Cost": pos.average_cost,
+            "Price": price,
+            "Value": market_value,
+            "P&L": pnl,
             "P&L %": pnl_pct,
         })
 
-    df = pd.DataFrame(rows)
+    # Toggle between custom HTML and interactive DataFrame
+    use_interactive = st.toggle("Interactive table", value=False,
+                                key=f"tbl_toggle_{currency_symbol}")
 
-    # Style
-    def style_row(row):
-        styles = [""] * len(row)
-        pnl_col = f"P&L ({currency_symbol})"
-        if pnl_col in row.index and pd.notna(row[pnl_col]):
-            color = "#2ecc71" if row[pnl_col] >= 0 else "#e74c3c"
-            idx = list(row.index).index(pnl_col)
-            styles[idx] = f"color: {color}; font-weight: bold"
-            pct_col = "P&L %"
-            if pct_col in row.index:
-                styles[list(row.index).index(pct_col)] = f"color: {color}; font-weight: bold"
-        return styles
+    if use_interactive:
+        df = pd.DataFrame(rows)
 
-    fmt = {
-        "Qty": "{:,.4f}",
-        f"Avg Cost ({currency_symbol})": f"{currency_symbol}{{:,.2f}}",
-        f"Price ({currency_symbol})": f"{currency_symbol}{{:,.2f}}",
-        f"Value ({currency_symbol})": f"{currency_symbol}{{:,.2f}}",
-        f"P&L ({currency_symbol})": f"{currency_symbol}{{:,.2f}}",
-        "P&L %": "{:+.2f}%",
-    }
+        def style_row(row):
+            styles = [""] * len(row)
+            if "P&L" in row.index and pd.notna(row["P&L"]):
+                color = theme.PROFIT if row["P&L"] >= 0 else theme.LOSS
+                for col in ("P&L", "P&L %"):
+                    if col in row.index:
+                        styles[list(row.index).index(col)] = f"color: {color}; font-weight: bold"
+            return styles
 
-    styled = (
-        df.style
-        .apply(style_row, axis=1)
-        .format(fmt, na_rep="—")
-    )
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+        fmt = {
+            "Qty": "{:,.4f}",
+            "Avg Cost": f"{currency_symbol}{{:,.2f}}",
+            "Price": f"{currency_symbol}{{:,.2f}}",
+            "Value": f"{currency_symbol}{{:,.2f}}",
+            "P&L": f"{currency_symbol}{{:+,.2f}}",
+            "P&L %": "{:+.2f}%",
+        }
+        styled = df.style.apply(style_row, axis=1).format(fmt, na_rep="—")
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    else:
+        # Custom HTML table
+        headers = ["Symbol", "Name", "Mkt", "Qty", "Avg Cost", "Price",
+                    "Value", "P&L", "P&L %"]
+        alignments = ["l", "l", "l", "r", "r", "r", "r", "r", "r"]
+
+        html_rows = []
+        for r in rows:
+            pnl_val = r["P&L"]
+            pnl_pct_val = r["P&L %"]
+            pnl_class = "gain" if (pnl_val is not None and pnl_val >= 0) else "loss"
+
+            html_rows.append([
+                r["Symbol"],
+                r["Name"],
+                r["Mkt"],
+                f'{r["Qty"]:,.4f}',
+                f'{currency_symbol}{r["Avg Cost"]:,.2f}' if r["Avg Cost"] else "—",
+                f'{currency_symbol}{r["Price"]:,.2f}' if r["Price"] else "—",
+                f'{currency_symbol}{r["Value"]:,.2f}' if r["Value"] else "—",
+                f'<span class="pnl-pill {pnl_class}">{currency_symbol}{pnl_val:+,.2f}</span>' if pnl_val is not None else "—",
+                f'<span class="pnl-pill {pnl_class}">{pnl_pct_val:+.2f}%</span>' if pnl_pct_val is not None else "—",
+            ])
+
+        st.markdown(html_table(headers, html_rows, alignments),
+                    unsafe_allow_html=True)
