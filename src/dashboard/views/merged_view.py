@@ -92,95 +92,78 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
 
     st.divider()
 
-    # ── Position table ───────────────────────────────────────────────────────
+    # ── Position data ──────────────────────────────────────────────────────
     if not rows:
         st.info("No open positions.")
         return
 
     df = pd.DataFrame(rows)
 
-    use_interactive = st.toggle("Interactive table", value=False, key="merged_tbl")
+    # ── Charts — allocation (donut) left, P&L right ──────────────────────
+    col_alloc, col_pnl = st.columns([1, 2])
 
-    if use_interactive:
-        def _style_pnl(row):
-            styles = [""] * len(row)
-            if "P&L ₪" in row.index and pd.notna(row["P&L ₪"]):
-                color = theme.PROFIT if row["P&L ₪"] >= 0 else theme.LOSS
-                for col in ("P&L ₪", "P&L %"):
-                    if col in row.index:
-                        styles[list(row.index).index(col)] = f"color: {color}; font-weight: bold"
-            return styles
+    with col_alloc:
+        valid = df[df["Value ₪"].notna() & (df["Value ₪"] > 0)]
+        if not valid.empty:
+            fig_pie = px.pie(
+                valid, names="Display", values="Value ₪",
+                title="Full Portfolio Allocation (₪)", hole=0.35,
+                color_discrete_sequence=theme.CHART_COLORS,
+            )
+            fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+            fig_pie.update_layout(height=420, margin=dict(t=50, b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        fmt = {
-            "Qty": "{:,.4f}", "Cost ₪": "₪{:,.2f}", "Price ₪": "₪{:,.2f}",
-            "Value ₪": "₪{:,.2f}", "P&L ₪": "₪{:+,.2f}", "P&L %": "{:+.2f}%",
-        }
-        table_cols = [c for c in df.columns if c != "Display"]
-        st.dataframe(
-            df[table_cols].style.apply(_style_pnl, axis=1).format(fmt, na_rep="—"),
-            use_container_width=True, hide_index=True,
-        )
-    else:
-        headers = ["Symbol", "Name", "Mkt", "Qty", "Cost ₪", "Price ₪",
-                    "Value ₪", "P&L ₪", "P&L %"]
-        alignments = ["l", "l", "l", "r", "r", "r", "r", "r", "r"]
-        html_rows = []
-        for r in rows:
-            pnl_val = r["P&L ₪"]
-            pnl_pct_val = r["P&L %"]
-            pnl_class = "gain" if (pnl_val is not None and pnl_val >= 0) else "loss"
-            html_rows.append([
-                r["Symbol"], r["Name"], r["Mkt"],
-                f'{r["Qty"]:,.4f}',
-                f'₪{r["Cost ₪"]:,.2f}' if r["Cost ₪"] else "—",
-                f'₪{r["Price ₪"]:,.2f}' if r["Price ₪"] else "—",
-                f'₪{r["Value ₪"]:,.2f}' if r["Value ₪"] else "—",
-                f'<span class="pnl-pill {pnl_class}">₪{pnl_val:+,.2f}</span>' if pnl_val is not None else "—",
-                f'<span class="pnl-pill {pnl_class}">{pnl_pct_val:+.2f}%</span>' if pnl_pct_val is not None else "—",
-            ])
-        st.markdown(html_table(headers, html_rows, alignments),
-                    unsafe_allow_html=True)
+    with col_pnl:
+        pnl_valid = df[df["P&L ₪"].notna()].sort_values("P&L ₪")
+        if not pnl_valid.empty:
+            tase_df = pnl_valid[pnl_valid["Mkt"] == "TASE"]
+            us_df = pnl_valid[pnl_valid["Mkt"] == "US"]
 
-    # ── Charts ───────────────────────────────────────────────────────────────
-    valid = df[df["Value ₪"].notna() & (df["Value ₪"] > 0)]
-    if not valid.empty:
-        fig_pie = px.pie(
-            valid, names="Display", values="Value ₪",
-            title="Full Portfolio Allocation (₪)", hole=0.35,
-            color_discrete_sequence=theme.CHART_COLORS,
-        )
-        fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-        fig_pie.update_layout(height=420, margin=dict(t=50, b=10))
-        st.plotly_chart(fig_pie, use_container_width=True)
+            fig_bar = go.Figure()
+            if not tase_df.empty:
+                fig_bar.add_trace(go.Bar(
+                    x=tase_df["P&L ₪"], y=tase_df["Display"],
+                    orientation="h", name="TASE",
+                    marker_color=theme.ACCENT_PRIMARY,
+                    text=[f"₪{v:+,.0f}" for v in tase_df["P&L ₪"]],
+                    textposition="outside",
+                ))
+            if not us_df.empty:
+                fig_bar.add_trace(go.Bar(
+                    x=us_df["P&L ₪"], y=us_df["Display"],
+                    orientation="h", name="US",
+                    marker_color=theme.BM_SP500,
+                    text=[f"₪{v:+,.0f}" for v in us_df["P&L ₪"]],
+                    textposition="outside",
+                ))
+            fig_bar.update_layout(
+                title="P&L per Position (₪)",
+                height=max(300, len(pnl_valid) * 28 + 80),
+                margin=dict(t=40, b=20, l=80),
+                yaxis=dict(autorange="reversed"),
+                barmode="relative",
+                legend=dict(orientation="h", y=1.02, yanchor="bottom"),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-    pnl_valid = df[df["P&L ₪"].notna()].sort_values("P&L ₪")
-    if not pnl_valid.empty:
-        tase_df = pnl_valid[pnl_valid["Mkt"] == "TASE"]
-        us_df = pnl_valid[pnl_valid["Mkt"] == "US"]
-
-        fig_bar = go.Figure()
-        if not tase_df.empty:
-            fig_bar.add_trace(go.Bar(
-                x=tase_df["P&L ₪"], y=tase_df["Display"],
-                orientation="h", name="TASE",
-                marker_color=theme.ACCENT_PRIMARY,
-                text=[f"₪{v:+,.0f}" for v in tase_df["P&L ₪"]],
-                textposition="outside",
-            ))
-        if not us_df.empty:
-            fig_bar.add_trace(go.Bar(
-                x=us_df["P&L ₪"], y=us_df["Display"],
-                orientation="h", name="US",
-                marker_color=theme.BM_SP500,
-                text=[f"₪{v:+,.0f}" for v in us_df["P&L ₪"]],
-                textposition="outside",
-            ))
-        fig_bar.update_layout(
-            title="P&L per Position (₪)",
-            height=max(300, len(pnl_valid) * 28 + 80),
-            margin=dict(t=40, b=20, l=80),
-            yaxis=dict(autorange="reversed"),
-            barmode="relative",
-            legend=dict(orientation="h", y=1.02, yanchor="bottom"),
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
+    # ── Position table ───────────────────────────────────────────────────────
+    headers = ["Symbol", "Name", "Mkt", "Qty", "Cost ₪", "Price ₪",
+                "Value ₪", "P&L ₪", "P&L %"]
+    alignments = ["l", "l", "l", "r", "r", "r", "r", "r", "r"]
+    html_rows = []
+    for r in rows:
+        pnl_val = r["P&L ₪"]
+        pnl_pct_val = r["P&L %"]
+        pnl_class = "gain" if (pnl_val is not None and pnl_val >= 0) else "loss"
+        html_rows.append([
+            r["Symbol"], r["Name"], r["Mkt"],
+            f'{r["Qty"]:,.4f}',
+            f'₪{r["Cost ₪"]:,.2f}' if r["Cost ₪"] else "—",
+            f'₪{r["Price ₪"]:,.2f}' if r["Price ₪"] else "—",
+            f'₪{r["Value ₪"]:,.2f}' if r["Value ₪"] else "—",
+            f'<span class="pnl-pill {pnl_class}">₪{pnl_val:+,.2f}</span>' if pnl_val is not None else "—",
+            f'<span class="pnl-pill {pnl_class}">{pnl_pct_val:+.2f}%</span>' if pnl_pct_val is not None else "—",
+        ])
+    st.markdown(html_table(headers, html_rows, alignments),
+                unsafe_allow_html=True)

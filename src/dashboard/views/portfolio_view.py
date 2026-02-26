@@ -4,7 +4,7 @@ import streamlit as st
 from src.dashboard import theme
 from src.dashboard.styles import section_header
 from src.dashboard.components.position_table import render_position_table
-from src.dashboard.components.charts import allocation_pie, allocation_treemap, pnl_bar
+from src.dashboard.components.charts import allocation_pie, pnl_bar
 
 
 def render(positions: dict, prices: dict, currency_symbol: str,
@@ -34,20 +34,11 @@ def render(positions: dict, prices: dict, currency_symbol: str,
 
     st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
 
-    render_position_table(positions, currency_symbol, filtered_prices)
-
-    # Charts
-    chart_type = st.radio("Chart type", ["Treemap", "Donut"],
-                          horizontal=True, key=f"chart_{title}")
-
-    col1, col2 = st.columns(2)
+    # Charts — allocation (donut) left, P&L right
+    col1, col2 = st.columns([1, 2])
     with col1:
-        if chart_type == "Treemap":
-            fig = allocation_treemap(positions, filtered_prices, currency_symbol,
-                                     f"{title} Allocation")
-        else:
-            fig = allocation_pie(positions, filtered_prices, currency_symbol,
-                                 f"{title} Allocation")
+        fig = allocation_pie(positions, filtered_prices, currency_symbol,
+                             f"{title} Allocation")
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 
@@ -55,3 +46,6 @@ def render(positions: dict, prices: dict, currency_symbol: str,
         fig2 = pnl_bar(positions, filtered_prices, currency_symbol, f"{title} P&L")
         if fig2:
             st.plotly_chart(fig2, use_container_width=True)
+
+    # Position table
+    render_position_table(positions, currency_symbol, filtered_prices)

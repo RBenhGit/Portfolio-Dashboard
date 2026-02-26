@@ -1,9 +1,7 @@
 """Reusable styled position table component."""
-import pandas as pd
 import streamlit as st
 from typing import Optional
 
-from src.dashboard import theme
 from src.dashboard.styles import html_table
 
 
@@ -43,55 +41,27 @@ def render_position_table(
             "P&L %": pnl_pct,
         })
 
-    # Toggle between custom HTML and interactive DataFrame
-    use_interactive = st.toggle("Interactive table", value=False,
-                                key=f"tbl_toggle_{currency_symbol}")
+    headers = ["Symbol", "Name", "Mkt", "Qty", "Avg Cost", "Price",
+                "Value", "P&L", "P&L %"]
+    alignments = ["l", "l", "l", "r", "r", "r", "r", "r", "r"]
 
-    if use_interactive:
-        df = pd.DataFrame(rows)
+    html_rows = []
+    for r in rows:
+        pnl_val = r["P&L"]
+        pnl_pct_val = r["P&L %"]
+        pnl_class = "gain" if (pnl_val is not None and pnl_val >= 0) else "loss"
 
-        def style_row(row):
-            styles = [""] * len(row)
-            if "P&L" in row.index and pd.notna(row["P&L"]):
-                color = theme.PROFIT if row["P&L"] >= 0 else theme.LOSS
-                for col in ("P&L", "P&L %"):
-                    if col in row.index:
-                        styles[list(row.index).index(col)] = f"color: {color}; font-weight: bold"
-            return styles
+        html_rows.append([
+            r["Symbol"],
+            r["Name"],
+            r["Mkt"],
+            f'{r["Qty"]:,.4f}',
+            f'{currency_symbol}{r["Avg Cost"]:,.2f}' if r["Avg Cost"] else "—",
+            f'{currency_symbol}{r["Price"]:,.2f}' if r["Price"] else "—",
+            f'{currency_symbol}{r["Value"]:,.2f}' if r["Value"] else "—",
+            f'<span class="pnl-pill {pnl_class}">{currency_symbol}{pnl_val:+,.2f}</span>' if pnl_val is not None else "—",
+            f'<span class="pnl-pill {pnl_class}">{pnl_pct_val:+.2f}%</span>' if pnl_pct_val is not None else "—",
+        ])
 
-        fmt = {
-            "Qty": "{:,.4f}",
-            "Avg Cost": f"{currency_symbol}{{:,.2f}}",
-            "Price": f"{currency_symbol}{{:,.2f}}",
-            "Value": f"{currency_symbol}{{:,.2f}}",
-            "P&L": f"{currency_symbol}{{:+,.2f}}",
-            "P&L %": "{:+.2f}%",
-        }
-        styled = df.style.apply(style_row, axis=1).format(fmt, na_rep="—")
-        st.dataframe(styled, use_container_width=True, hide_index=True)
-    else:
-        # Custom HTML table
-        headers = ["Symbol", "Name", "Mkt", "Qty", "Avg Cost", "Price",
-                    "Value", "P&L", "P&L %"]
-        alignments = ["l", "l", "l", "r", "r", "r", "r", "r", "r"]
-
-        html_rows = []
-        for r in rows:
-            pnl_val = r["P&L"]
-            pnl_pct_val = r["P&L %"]
-            pnl_class = "gain" if (pnl_val is not None and pnl_val >= 0) else "loss"
-
-            html_rows.append([
-                r["Symbol"],
-                r["Name"],
-                r["Mkt"],
-                f'{r["Qty"]:,.4f}',
-                f'{currency_symbol}{r["Avg Cost"]:,.2f}' if r["Avg Cost"] else "—",
-                f'{currency_symbol}{r["Price"]:,.2f}' if r["Price"] else "—",
-                f'{currency_symbol}{r["Value"]:,.2f}' if r["Value"] else "—",
-                f'<span class="pnl-pill {pnl_class}">{currency_symbol}{pnl_val:+,.2f}</span>' if pnl_val is not None else "—",
-                f'<span class="pnl-pill {pnl_class}">{pnl_pct_val:+.2f}%</span>' if pnl_pct_val is not None else "—",
-            ])
-
-        st.markdown(html_table(headers, html_rows, alignments),
-                    unsafe_allow_html=True)
+    st.markdown(html_table(headers, html_rows, alignments),
+                unsafe_allow_html=True)

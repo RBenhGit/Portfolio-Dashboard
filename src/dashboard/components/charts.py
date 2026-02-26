@@ -324,6 +324,11 @@ def rolling_sharpe_chart(series: pd.Series, window: int = 60) -> Optional[go.Fig
         mode="lines", name=f"{window}d Rolling Sharpe",
         line=dict(color=theme.ACCENT_SECONDARY, width=2),
     ))
+    avg_sharpe = float(rolling_sharpe.mean())
+    fig.add_hline(y=avg_sharpe, line_dash="dash", line_color=theme.BM_SP500,
+                  opacity=0.7,
+                  annotation_text=f"Avg: {avg_sharpe:.2f}",
+                  annotation_font_color=theme.BM_SP500)
     fig.add_hline(y=0, line_dash="dot", line_color=theme.TEXT_MUTED)
     fig.add_hline(y=1, line_dash="dot", line_color=theme.PROFIT, opacity=0.3,
                   annotation_text="Sharpe = 1",

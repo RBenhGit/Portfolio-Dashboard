@@ -1,41 +1,79 @@
 # IBI Portfolio Dashboard
 
-A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports.
+A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 6 interactive tabs with 9 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
 
 ---
 
 ## Why
 
+### The Problem
+
 Israeli investors using **IBI** (a leading Israeli brokerage) face a significant gap: the broker provides raw transaction exports in Excel with Hebrew labels, 21 distinct transaction types, prices in agorot (1/100 shekel), phantom internal entries, and no unified portfolio view across markets. Manually tracking holdings, cost basis, realized P&L, and multi-currency performance across both the **Tel Aviv Stock Exchange (TASE)** and **US equity markets** is error-prone and time-consuming.
 
-This dashboard was built to:
+### What This Dashboard Solves
 
-- **Automate portfolio reconstruction** from 2,000+ raw broker transactions spanning May 2022 to present
-- **Handle IBI's data quirks** — agorot pricing, Hebrew transaction types, phantom entries (tax/forex placeholders), option expiry ordering bugs, and pre-transfer missing shares
-- **Provide multi-currency accounting** — track NIS and USD positions independently, with historically accurate FX rates (USD/ILS) for cost basis and current valuation
-- **Deliver real-time insights** — unrealized P&L, allocation charts, realized trade history, and a unified portfolio view in shekels
-- **Eliminate manual spreadsheet tracking** — one Excel upload produces a fully classified, priced, and visualized portfolio
+| Pain Point | Previous Manual Approach | Dashboard Solution |
+|-----------|--------------------------|-------------------|
+| **Transaction classification** | Manually map 21 Hebrew types | Automated classifier recognizes all types + cost basis |
+| **Agorot conversion** | Error-prone mental math (÷100) | Normalized at ingestion boundary |
+| **Multi-currency P&L** | Spreadsheet formulas with date-lookup | Historical FX rates cached per transaction date |
+| **Portfolio reconstruction** | Start from scratch each time | Deduplicated, incremental inserts; sequential builder pass |
+| **Unrealized vs realized** | Manual tracking spreadsheets | Automated calculations per position per sell |
+| **Phantom filtering** | Delete suspicious rows manually | Regex pattern detection + symbol-based filtering |
+| **Performance metrics** | No baseline (CAGR, Sharpe, etc.) | Built-in vs S&P 500 and TA-125 comparison |
+| **Options handling** | Treat like stocks, causes errors | Short-sell support, expiry reordering fix |
+| **Pre-transfer shares** | Unknown initial positions | Auto-phantom adjustment for shortfalls |
+
+### IBI Broker Quirks & Design Decisions
+
+| Quirk | Design Decision | Trade-off |
+|-------|----------------|-----------|
+| **Agorot pricing** — TASE prices in 1/100 shekel | Convert all TASE prices ÷100 at ingestion boundary | Detection logic required for API prices; one-time conversion at boundaries |
+| **21 Hebrew transaction types** | Broker-agnostic classifier interface (`BaseClassifier` ABC) with IBI-specific implementation | Allows future broker integrations without touching builder/dashboard |
+| **Phantom entries** — tax accounts (999*), forex (99028), settlement (5039813) | Mark `is_phantom=1` in DB, filter at query time | Preserves audit trail; allows re-examination if detection logic is wrong |
+| **Option expiry reordering** — IBI records sell before credit | Reorder sort keys to process credits before sells | Transparent to downstream; sort key is string-based |
+| **Pre-transfer missing shares** — sells exceed available qty | Auto-fill shortfall at cost basis ₪0 | Early positions have artificially depressed cost basis |
+| **Stock splits (הטבה)** — ambiguous: split if price=0, bonus if price>0 | Inspect execution price to classify | Heuristic; breaks if IBI records split with non-zero price |
+| **Historical FX rates** — reference date is last transaction date | Store per-date rates; no live FX for valuations | Reproducible valuations tied to data; no daily fluctuation surprises |
+| **Same-date ordering** — buys and sells on same date | Process "add" before "remove" via sort key priority | Prevents false insufficient-shares errors |
 
 ---
 
 ## What
 
-### Dashboard Features
+### Dashboard Tabs (6)
 
-| Feature | Description |
-|---------|-------------|
-| **Six portfolio tabs** | Statistics, TASE (₪), US ($), Merged (all in ₪), Options, and Performance |
-| **Position tracking** | Quantity, average cost, market price, market value, unrealized P&L (absolute and %) |
-| **Cash balances** | NIS cash (from IBI's running balance) and USD cash (accumulated from forex transactions) |
-| **Allocation charts** | Interactive donut pie charts showing market value distribution |
-| **P&L charts** | Horizontal bar charts with color-coded gains (green) and losses (red) per position |
-| **Merged view** | All positions converted to ₪ using historical FX rate for the reference date, with historical cost basis preserved |
-| **Options view** | Open options positions separated by currency (NIS/USD), with long/short classification |
-| **Statistics overview** | Portfolio summary, performance metrics (Total Return, CAGR, Max Drawdown, Sharpe), trading activity (win rate, avg holding period), risk & diversification analysis |
-| **Performance analytics** | Total Return, CAGR, Max Drawdown, Sharpe Ratio with S&P 500 and TA-125 benchmark comparison, portfolio value and cumulative returns charts |
-| **Sidebar controls** | Upload new Excel files, force re-parse, refresh prices, view API status and import history |
-| **Realized P&L** | Per-trade gain/loss tracking for every sell transaction |
-| **Daily portfolio state** | Historical snapshots of invested amount, cash, and cumulative P&L for each transaction date |
+| Tab | Name | Layout | Key Content |
+|-----|------|--------|-------------|
+| 1 | **Statistics** | Two-column (1/3 stats, 2/3 charts) | Portfolio summary (6 metric cards), performance metrics table (vs benchmarks), top 5 gainers/losers, currency exposure, treemap composition, P&L breakdown bar |
+| 2 | **Performance** | Full-width, 6 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; area chart, drawdown, cumulative returns vs benchmarks, monthly returns bar, rolling Sharpe, monthly heatmap |
+| 3 | **TASE (₪)** | Full-width | NIS positions with cash card, donut pie allocation, P&L bar chart, styled position table |
+| 4 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
+| 5 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
+| 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for interactive table |
+
+### Charts (9 Plotly Functions)
+
+| Chart | Function | Height | Description |
+|-------|----------|--------|-------------|
+| Allocation Donut Pie | `allocation_pie()` | 380px | Market value allocation with 35% hole, percent+label inside |
+| P&L Horizontal Bar | `pnl_bar()` | auto | Color-coded gain/loss bars with currency labels |
+| Portfolio Treemap | `allocation_treemap()` | 450px | Hierarchical allocation colored by P&L %, multi-currency |
+| P&L Waterfall | `waterfall_pnl()` | 400px | Cumulative P&L with running total |
+| Area with Gradient | `area_chart_with_gradient()` | 420px | Portfolio value over time with gradient fill |
+| Drawdown Underwater | `drawdown_chart()` | 250px | Red underwater plot showing peak-to-trough decline |
+| Monthly Returns Heatmap | `monthly_returns_heatmap()` | auto | Calendar-style year×month grid colored by return % |
+| Monthly Returns Bar | `monthly_returns_bar()` | 350px | Monthly returns with color-coded gain/loss bars |
+| Rolling Sharpe | `rolling_sharpe_chart()` | 300px | 60-day rolling Sharpe with average line and reference lines |
+
+### Performance Metrics
+
+| Metric | Formula | Notes |
+|--------|---------|-------|
+| Total Return | `(end / start - 1) × 100` | Cost basis + realized P&L only |
+| CAGR | `(end / start)^(1/years) - 1` | Uses 365.25 days/year |
+| Max Drawdown | `min((series - cummax) / cummax)` | Peak-to-trough decline % |
+| Sharpe Ratio | `mean(excess) / std(excess) × √252` | 4% risk-free rate, min 30 data points |
 
 ### Supported Transaction Types (21)
 
@@ -50,12 +88,24 @@ This dashboard was built to:
 | **Fees/Tax** | דמי טפול, משיכת מס חול מטח, משיכת מס מטח, משיכת ריבית מטח | Cash outflow (phantom) |
 | **Other** | ריבית מזומן בשח (interest), העברה מזומן בשח (transfer) | Cash movements |
 
-### Special Handling
+### Sidebar Controls
 
-- **Option short selling** — options (8-digit symbols starting with 8 or 9) can go negative (short positions)
-- **Pre-transfer positions** — shares bought before the data starts are auto-filled when a sell exceeds available quantity
-- **Same-date ordering** — buys are processed before sells on the same date to prevent false insufficient-shares errors
-- **Phantom filtering** — internal broker entries (tax accounts, forex placeholders) are excluded from positions
+- **API Status** — Twelvedata: Connected / Unavailable indicator
+- **Import Transactions** — File uploader for new `.xlsx` files (deduplicates automatically)
+- **Last Import Info** — Filename, timestamp, rows added
+- **Force Re-parse Excel** — Re-process the configured Excel file
+- **Refresh Prices** — Clear price cache and fetch current market data
+- **Database Info** — Path to `.db`, total transaction count
+
+### Limitations
+
+- Portfolio value is **cost basis + realized P&L only** — unrealized gains/losses are shown separately per position but not in the Performance tab's historical series
+- Performance charts end at the **last transaction date**, not today's date
+- Sharpe Ratio uses a **hardcoded 4% risk-free rate** and requires ≥30 data points
+- Only **2 benchmarks** supported (S&P 500, TA-125); adding more requires editing `BENCHMARKS` dict
+- FX conversion uses the rate from the portfolio state snapshot, not live rates
+- Options are not priced (no market price fetching for options)
+- Pre-transfer phantom shares are created at cost basis ₪0
 
 ---
 
@@ -66,9 +116,9 @@ This dashboard was built to:
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Streamlit Dashboard (app.py) — 6 tabs                       │
-│  statistics_view, portfolio_view, merged_view,               │
-│  options_view, performance_view                              │
-│  charts, position_table, performance_metrics                 │
+│  statistics_view, performance_view, portfolio_view,           │
+│  merged_view, options_view                                   │
+│  theme, styles, charts, position_table, performance_metrics  │
 ├──────────────────────────────────────────────────────────────┤
 │  Portfolio Engine                                            │
 │  builder.py (sequential build) + price_fetcher.py            │
@@ -116,23 +166,29 @@ Price Fetcher ──── Fetch closing prices for open positions
     │                Primary: Twelvedata │ Fallback: yfinance
     ▼
 Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
-    Tab 1: Statistics — portfolio summary, performance, trading activity, risk
-    Tab 2: TASE (₪) — NIS positions
-    Tab 3: US ($) — USD positions
-    Tab 4: Merged (₪) — all positions in shekels
-    Tab 5: Options — open options positions
-    Tab 6: Performance — historical returns vs benchmarks
+    Tab 1: Statistics — portfolio summary, performance, top gainers/losers
+    Tab 2: Performance — historical returns vs benchmarks (6 charts)
+    Tab 3: TASE (₪) — NIS positions
+    Tab 4: US ($) — USD positions
+    Tab 5: Merged (₪) — all positions in shekels
+    Tab 6: Options — open options positions
 ```
 
 ### Key Algorithms
 
-**Sequential Portfolio Build** — processes every transaction chronologically, maintaining position maps (`positions_nis`, `positions_usd`), cash balances, and cumulative realized P&L. Each sell calculates `realized_pnl = qty × (sale_price - avg_cost)` and proportionally reduces cost basis.
+**Sequential Portfolio Build** ([builder.py](src/portfolio/builder.py)) — Processes every transaction chronologically in a single pass, maintaining position maps (`positions_nis`, `positions_usd`), cash balances, and cumulative realized P&L. Each sell calculates `realized_pnl = qty × (sale_price - avg_cost)` and proportionally reduces cost basis. NIS cash uses IBI's own running balance column; USD cash is accumulated from cash flow transactions.
 
-**Stock Split Handling** — IBI records splits as the number of NEW shares added. The builder computes `new_quantity = current + added`, keeping `total_invested` unchanged so average cost adjusts automatically.
+**Stock Split Handling** — IBI records splits as the number of NEW shares added (הטבה with price=0). The builder computes `new_quantity = current + added`, keeping `total_invested` unchanged so average cost adjusts automatically: `ratio = (pos.quantity + qty_abs) / pos.quantity`.
 
-**Option Expiry Reordering** — IBI records expiry credits after sells of the same option on the same date. The builder adjusts sort keys to process credits first, preventing false insufficient-shares errors.
+**Option Expiry Reordering** ([builder.py:21-51](src/portfolio/builder.py#L21-L51)) — IBI records expiry credits (הפקדה פקיעה) after sells on the same date. The builder adjusts sort keys to process credits first (`date_0` for adds, `date_1` for removes), preventing false insufficient-shares errors.
 
-**TASE Symbol Resolution** — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution follows: runtime cache → DB cache → static map (7 known stocks) → Twelvedata symbol_search API → fallback to None.
+**Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later.
+
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (7 known stocks) → Twelvedata `symbol_search` API → fallback to None.
+
+**Stabilization Detection** ([performance_view.py:46-56](src/dashboard/views/performance_view.py#L46-L56)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there.
+
+**Benchmark Caching** ([benchmark_fetcher.py](src/market/benchmark_fetcher.py)) — S&P 500 and TA-125 prices cached in SQLite `benchmark_cache` table. Fetcher checks cached date ranges and only requests missing periods from yfinance, minimizing API calls. Failures degrade gracefully (logged as warnings).
 
 ### Database Schema (SQLite, 11 tables)
 
@@ -162,6 +218,18 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 | Price Data | Twelvedata (primary) + yfinance >=0.2.66 (fallback) |
 | HTTP | requests >=2.31.0 |
 | Config | python-dotenv >=1.0.0 |
+
+### Color Theme
+
+| Semantic | Hex | Usage |
+|----------|-----|-------|
+| Profit | `#10B981` | Positive P&L, gains |
+| Loss | `#EF4444` | Negative P&L, losses |
+| Accent Primary | `#6366F1` | Portfolio line, headers, TASE |
+| S&P 500 | `#F59E0B` | Amber dashed benchmark |
+| TA-125 | `#EC4899` | Pink dashed benchmark |
+| Background | `#FAFBFE` | Page background |
+| Text Primary | `#1E293B` | Main text |
 
 ---
 
@@ -227,6 +295,11 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
+├── tests/                          # Test suite (88 tests)
+│   ├── test_builder.py             # Portfolio build logic tests
+│   ├── test_classifier.py          # Transaction classification tests
+│   ├── test_performance_metrics.py # Metric calculation tests
+│   └── test_repository.py          # Database CRUD tests
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx       # IBI broker export
 ├── data/
@@ -253,14 +326,16 @@ Portfolio_Dashboard/
     │   ├── db.py                   # SQLite schema (11 tables, WAL mode)
     │   └── repository.py           # Data access layer (CRUD)
     └── dashboard/
+        ├── theme.py                # Color palette, Plotly template (ibi_dark)
+        ├── styles.py               # CSS stylesheet + HTML helpers (metric_card_html, html_table)
         ├── components/
-        │   ├── charts.py           # Plotly pie & bar charts
-        │   ├── position_table.py   # Styled position DataFrame
-        │   └── performance_metrics.py # CAGR, Sharpe, max drawdown calculations
+        │   ├── charts.py           # 9 Plotly chart functions (pie, bar, treemap, waterfall, area, drawdown, heatmap, monthly bar, rolling Sharpe)
+        │   ├── position_table.py   # Styled HTML position table
+        │   └── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
         └── views/
-            ├── statistics_view.py  # Portfolio stats, performance, trading, risk
-            ├── portfolio_view.py   # Single-market tab (TASE or US)
-            ├── merged_view.py      # Combined all-in-₪ view
-            ├── options_view.py     # Open options positions (NIS + USD)
-            └── performance_view.py # Historical returns + benchmark comparison
+            ├── statistics_view.py  # Tab 1: Two-column layout — stats + charts
+            ├── performance_view.py # Tab 2: 6 charts + benchmark comparison
+            ├── portfolio_view.py   # Tabs 3-4: Single-market (TASE or US)
+            ├── merged_view.py      # Tab 5: All positions in ₪
+            └── options_view.py     # Tab 6: Open options with long/short badges
 ```

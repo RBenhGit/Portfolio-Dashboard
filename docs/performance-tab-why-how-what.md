@@ -1,6 +1,6 @@
 # Performance Tab — Why · How · What
 
-The Performance tab provides historical portfolio performance tracking with benchmark comparison for an IBI brokerage portfolio. It computes key financial metrics (Total Return, CAGR, Max Drawdown, Sharpe Ratio) and renders two interactive Plotly charts — portfolio value over time and cumulative returns vs S&P 500 and TA-125. A stabilization detection algorithm automatically skips the initial account build-up period where bulk imports distort the data. The tab displays **only actual historical data** with no forward-looking projections.
+The Performance tab (Tab 2) provides historical portfolio performance tracking with benchmark comparison for an IBI brokerage portfolio. It computes key financial metrics (Total Return, CAGR, Max Drawdown, Sharpe Ratio) and renders **six interactive Plotly charts** — portfolio value area chart with gradient fill, drawdown underwater plot, cumulative returns vs S&P 500 and TA-125, monthly returns bar chart, rolling Sharpe ratio (60-day window), and monthly returns heatmap. A stabilization detection algorithm automatically skips the initial account build-up period where bulk imports distort the data. The tab displays **only actual historical data** with no forward-looking projections.
 
 ---
 
@@ -53,27 +53,29 @@ An earlier version also injected the current live market value as today's data p
 ```
 ┌──────────────────────────┐
 │ SQLite: daily_portfolio_  │
-│ state table (db.py:106)  │
+│ state table (db.py)      │
 └──────────┬───────────────┘
            │ repository.get_daily_portfolio_states()
            ▼
 ┌──────────────────────────┐     ┌───────────────────────────┐
 │ performance_view.py      │────▶│ benchmark_fetcher.py      │
-│  • Aggregation (L24-33)  │     │  • yfinance + SQLite cache│
-│  • Stabilization (L35-47)│     │  • S&P 500, TA-125       │
-│  • Metrics (L65-74)      │     └───────────────────────────┘
-│  • Charts (L84-150)      │
+│  • Aggregation           │     │  • yfinance + SQLite cache│
+│  • Stabilization         │     │  • S&P 500, TA-125       │
+│  • Metrics               │     └───────────────────────────┘
+│  • 6 Charts              │
 └──────────┬───────────────┘
            │ calls
            ▼
-┌──────────────────────────┐
-│ performance_metrics.py   │
-│  • compute_cagr          │
-│  • compute_max_drawdown  │
-│  • compute_sharpe_ratio  │
-│  • compute_cumulative_   │
-│    returns               │
-└──────────────────────────┘
+┌──────────────────────────┐     ┌───────────────────────────┐
+│ performance_metrics.py   │     │ charts.py                 │
+│  • compute_cagr          │     │  • area_chart_with_       │
+│  • compute_max_drawdown  │     │    gradient               │
+│  • compute_sharpe_ratio  │     │  • drawdown_chart         │
+│  • compute_cumulative_   │     │  • monthly_returns_bar    │
+│    returns               │     │  • monthly_returns_       │
+└──────────────────────────┘     │    heatmap                │
+                                 │  • rolling_sharpe_chart   │
+                                 └───────────────────────────┘
 ```
 
 ### Data Flow
@@ -83,12 +85,12 @@ An earlier version also injected the current live market value as today's data p
 3. **Filter** — Stabilization detection trims the leading build-up period ([performance_view.py:35-47](src/dashboard/views/performance_view.py#L35-L47))
 4. **Benchmark** — Fetch S&P 500 and TA-125 from Yahoo Finance with SQLite caching ([benchmark_fetcher.py:15-47](src/market/benchmark_fetcher.py#L15-L47))
 5. **Compute** — Calculate Total Return, CAGR, Max Drawdown, Sharpe Ratio ([performance_metrics.py](src/dashboard/components/performance_metrics.py))
-6. **Render** — Two Plotly charts + metric cards via Streamlit
+6. **Render** — Six Plotly charts + metric cards via Streamlit
 
 ### Stabilization Detection Algorithm
 
 ```python
-# performance_view.py lines 35-47
+# performance_view.py lines 46-56
 portfolio_series = portfolio_series[portfolio_series > 0]       # drop zeros
 pct_change = portfolio_series.pct_change().abs()                # daily % change
 stable_mask = pct_change <= 0.10                                # ≤10% = stable
@@ -140,19 +142,22 @@ Benchmark prices are cached in `benchmark_cache` table ([db.py:153-159](src/data
 ### Features
 
 1. **4 Metric Cards** — Total Return, CAGR, Max Drawdown, Sharpe Ratio displayed in a row
-2. **Benchmark Captions** — Total Return and CAGR for each benchmark shown below the cards
-3. **Portfolio Value Chart** — Line chart of portfolio value (₪) over time (400px)
-4. **Cumulative Returns Chart** — Base-100 normalized chart comparing portfolio vs benchmarks (450px)
-5. **Auto Build-Up Detection** — Automatically skips initial import period (>10% daily swings)
-6. **Benchmark Caching** — SQLite cache for S&P 500 and TA-125 prices
-7. **Historical Data Only** — No forward-looking projections; charts end at the last stored daily state
+2. **Benchmark Captions** — Total Return and CAGR for each benchmark shown below the cards (colored labels)
+3. **Portfolio Value Chart** — Area chart with gradient fill showing portfolio value (₪) over time (420px)
+4. **Drawdown Chart** — Underwater/drawdown plot with red fill (250px)
+5. **Cumulative Returns Chart** — Base-100 normalized chart comparing portfolio (indigo solid) vs S&P 500 (amber dashed) and TA-125 (pink dashed) (450px)
+6. **Monthly Returns Bar + Rolling Sharpe** — Side-by-side: monthly returns bar chart (350px) and 60-day rolling Sharpe ratio with average line (300px)
+7. **Monthly Returns Heatmap** — Calendar-style year×month grid colored by return percentage
+8. **Auto Build-Up Detection** — Automatically skips initial import period (>10% daily swings)
+9. **Benchmark Caching** — SQLite cache for S&P 500 and TA-125 prices
+10. **Historical Data Only** — No forward-looking projections; charts end at the last stored daily state
 
 ### Supported Benchmarks
 
 | Name | Symbol | Style in Chart |
 |------|--------|----------------|
-| S&P 500 | `^GSPC` | Orange dashed |
-| TA-125 | `^TA125.TA` | Green dashed |
+| S&P 500 | `^GSPC` | Amber dashed (`#F59E0B`) |
+| TA-125 | `^TA125.TA` | Pink dashed (`#EC4899`) |
 
 ### Inputs
 
@@ -166,21 +171,26 @@ Benchmark prices are cached in `benchmark_cache` table ([db.py:153-159](src/data
 | Output | Type | Description |
 |--------|------|-------------|
 | 4 metric cards | `st.metric` | Key performance indicators |
-| Benchmark captions | `st.caption` | Per-benchmark Total Return + CAGR |
-| Portfolio Value chart | Plotly `go.Scatter` | Value in ₪ over time (400px) |
+| Benchmark captions | `st.markdown` | Per-benchmark Total Return + CAGR (colored) |
+| Portfolio Value chart | `area_chart_with_gradient()` | Area chart with fill, value in ₪ (420px) |
+| Drawdown chart | `drawdown_chart()` | Underwater plot, red fill (250px) |
 | Cumulative Returns chart | Plotly `go.Scatter` | Base-100 multi-line comparison (450px) |
+| Monthly Returns bar | `monthly_returns_bar()` | Monthly returns, colored bars (350px) |
+| Rolling Sharpe chart | `rolling_sharpe_chart()` | 60-day window with avg line (300px) |
+| Monthly Returns heatmap | `monthly_returns_heatmap()` | Year×month calendar grid |
 | Disclaimer caption | `st.caption` | Notes cost-basis methodology |
 
 ### Configuration
 
 | Setting | Value | Location |
 |---------|-------|----------|
-| Stabilization threshold | 10% daily change | [performance_view.py:44](src/dashboard/views/performance_view.py#L44) |
-| Risk-free rate | 4% annual | [performance_metrics.py:40](src/dashboard/components/performance_metrics.py#L40) |
-| Trading days/year | 252 | [performance_metrics.py:57](src/dashboard/components/performance_metrics.py#L57) |
-| Min points for Sharpe | 30 | [performance_metrics.py:45](src/dashboard/components/performance_metrics.py#L45) |
-| FX fallback rate | 3.7 ILS/USD | [builder.py:84](src/portfolio/builder.py#L84) |
-| Portfolio line color | `#1f77b4` (blue) | [performance_view.py:91](src/dashboard/views/performance_view.py#L91) |
+| Stabilization threshold | 10% daily change | `performance_view.py:53` |
+| Risk-free rate | 4% annual | `performance_metrics.py` |
+| Trading days/year | 252 | `performance_metrics.py` |
+| Min points for Sharpe | 30 | `performance_metrics.py` |
+| FX fallback rate | 3.7 ILS/USD | `builder.py` |
+| Portfolio line color | `#6366F1` (indigo) | `theme.BM_PORTFOLIO` |
+| Rolling Sharpe window | 60 days | `charts.rolling_sharpe_chart()` |
 
 ### Limitations
 

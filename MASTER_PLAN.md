@@ -7,12 +7,12 @@ by processing all IBI broker transactions from `Trans_Input/Transactions_IBI.xls
 May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction project.
 
 **Key drivers:**
-- Tab 1: Statistics — portfolio summary, performance metrics, trading activity, risk & diversification
-- Tab 2: TASE (₪) — full-width NIS positions
-- Tab 3: US ($) — full-width USD positions
-- Tab 4: Merged portfolio (all in ₪ using historically-correct FX rates)
-- Tab 5: Options — open options positions (NIS + USD)
-- Tab 6: Performance — historical returns with benchmark comparison (S&P 500, TA-125)
+- Tab 1: Statistics — portfolio summary, performance metrics, top gainers/losers, currency exposure
+- Tab 2: Performance — historical returns with benchmark comparison (6 charts)
+- Tab 3: TASE (₪) — full-width NIS positions
+- Tab 4: US ($) — full-width USD positions
+- Tab 5: Merged portfolio (all in ₪ using historically-correct FX rates)
+- Tab 6: Options — open options positions (NIS + USD)
 - All 21 IBI transaction types handled correctly, including stock splits
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
@@ -71,12 +71,12 @@ src/market/fx_fetcher.py           ← Twelvedata historical USD/ILS
         │
         ▼
 app.py → Streamlit
-    Tab 1: Statistics — portfolio summary, performance, trading, risk
-    Tab 2: TASE (₪) — full-width NIS positions
-    Tab 3: US ($) — full-width USD positions
-    Tab 4: Merged (₪) — all positions converted to shekels
-    Tab 5: Options — open options positions
-    Tab 6: Performance — historical returns vs benchmarks
+    Tab 1: Statistics — portfolio summary, performance, top gainers/losers
+    Tab 2: Performance — historical returns vs benchmarks (6 charts)
+    Tab 3: TASE (₪) — full-width NIS positions
+    Tab 4: US ($) — full-width USD positions
+    Tab 5: Merged (₪) — all positions converted to shekels
+    Tab 6: Options — open options positions
 
 src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 ```
@@ -97,6 +97,11 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md # Performance tab deep-dive
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf          # IBI API reference
+├── tests/                              # Test suite (88 tests)
+│   ├── test_builder.py                 # Portfolio build logic
+│   ├── test_classifier.py              # Transaction classification
+│   ├── test_performance_metrics.py     # Metric calculations
+│   └── test_repository.py             # Database CRUD
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx           # Source (read-only)
 ├── data/
@@ -122,21 +127,23 @@ Portfolio_Dashboard/
     │   ├── benchmark_fetcher.py       # S&P 500 & TA-125 via yfinance + SQLite cache
     │   └── symbol_mapper.py           # Market detection, TASE symbol handling
     └── dashboard/
+        ├── theme.py                   # Color palette, Plotly template (ibi_dark)
+        ├── styles.py                  # CSS stylesheet + HTML helpers (metric_card_html,
+        │                              #   section_header, html_table)
         ├── views/
-        │   ├── statistics_view.py     # render(portfolio, prices, price_date) — summary, performance,
-        │   │                          #   trading activity, risk & diversification (Tab 1)
-        │   ├── portfolio_view.py      # render(positions, prices, currency_symbol, cash, title)
-        │   │                          #   Renders ONE market at full width (called per tab)
-        │   ├── merged_view.py         # render(portfolio, prices, price_date) — all in ₪
-        │   ├── options_view.py        # render(options_nis, options_usd) — open options
-        │   └── performance_view.py    # render() — historical returns + benchmark comparison
+        │   ├── statistics_view.py     # Tab 1: Two-column layout — stats (left) + charts (right)
+        │   ├── performance_view.py    # Tab 2: 6 charts + benchmark comparison
+        │   ├── portfolio_view.py      # Tabs 3-4: Single-market at full width
+        │   ├── merged_view.py         # Tab 5: All positions unified in ₪
+        │   └── options_view.py        # Tab 6: Open options with direction badges
         └── components/
-            ├── position_table.py      # Reusable styled position table
+            ├── position_table.py      # Reusable styled HTML position table
             ├── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
-            └── charts.py             # Plotly pie + bar charts
-                                       # TASE chart labels use _display_label() to resolve
-                                       # IBI numeric IDs (e.g. "445015") to ticker symbols
-                                       # (e.g. "MTRX") via repository.get_tase_symbol()
+            └── charts.py             # 9 Plotly chart functions:
+                                       #   allocation_pie, pnl_bar, allocation_treemap,
+                                       #   waterfall_pnl, area_chart_with_gradient,
+                                       #   drawdown_chart, monthly_returns_heatmap,
+                                       #   monthly_returns_bar, rolling_sharpe_chart
 ```
 
 ---
@@ -340,7 +347,7 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 | B USD/ILS (symbol 99028) | forex_buy | none | amount_local_currency (neg) | +quantity | NIS→USD conversion |
 
 > **Note on הטבה:** Before coding, inspect all 7 rows in the DB.
-> If `execution_price == 0` and `security_symbol` matches an existing position → treat as **stock split** (apply ratio = quantity / current_position_qty, adjust avg_cost).
+> If `execution_price == 0` and `security_symbol` matches an existing position → treat as **stock split** (apply ratio = (current_qty + new_shares_added) / current_qty, adjust avg_cost).
 > If execution_price > 0 → treat as **bonus shares** (add shares at 0 cost).
 
 ### Implicit Behaviors
@@ -480,60 +487,99 @@ Market detection (in priority order):
 
 ## Dashboard Layout (Streamlit — 6 Tabs)
 
-### Tab 1: Statistics — portfolio-wide analytics
+### Tab 1: Statistics — portfolio-wide analytics (two-column layout)
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
-├────────────┬───────────┬──────────┬────────────┬──────────┬───────────────────────┤
-│ Statistics │ TASE (₪)  │  US ($)  │ Merged (₪) │ Options  │ Performance           │
-├────────────┴───────────┴──────────┴────────────┴──────────┴───────────────────────┤
-│  ┌──── Portfolio Summary ──────────────────────────────────────────────────┐│
-│  │ [Total Portfolio Value ₪] [Total P&L ₪] [P&L %] [Total Cash ₪]        ││
-│  │ [NIS Stocks] [USD Stocks] [NIS Options] [USD Options] [Total Pos]      ││
-│  │ Asset Allocation donut (stocks + cash; option premiums in cash)         ││
-│  │ Top 5 Gainers | Top 5 Losers (by P&L %)                               ││
-│  ├──── Performance Metrics ────────────────────────────────────────────────┤│
-│  │ [Total Return] [CAGR] [Max Drawdown] [Sharpe Ratio]                    ││
-│  │ S&P 500: Total Return +XX.X% | CAGR +XX.X%                            ││
-│  │ TA-125:  Total Return +XX.X% | CAGR +XX.X%                            ││
-│  ├──── Trading Activity ───────────────────────────────────────────────────┤│
-│  │ [Total Trades] [Realized P&L ₪] [Win Rate] [Avg Holding Period]        ││
-│  │ Most Traded Symbols bar chart (top 5)                                   ││
-│  ├──── Risk & Diversification ─────────────────────────────────────────────┤│
-│  │ [NIS Exposure %] [USD Exposure %] [Largest Position] [Total Positions] ││
-│  │ Asset Allocation pie | Market Concentration pie                         ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
+├────────────┬─────────────┬──────────┬──────────┬────────────┬─────────────────────┤
+│ Statistics │ Performance │ TASE (₪) │  US ($)  │ Merged (₪) │ Options             │
+├────────────┴─────────────┴──────────┴──────────┴────────────┴─────────────────────┤
+│  LEFT COLUMN (1/3 width)            │  RIGHT COLUMN (2/3 width)                    │
+│  ┌── Portfolio Summary ──────────┐  │  ┌── Portfolio Composition ────────────────┐ │
+│  │ [Total Value] [Total Cash]    │  │  │ Treemap colored by P&L %               │ │
+│  │ [Total P&L]   [P&L %]        │  │  └─────────────────────────────────────────┘ │
+│  │ [Realized P&L] [Avg Holding]  │  │  ┌── P&L Breakdown (₪) ──────────────────┐ │
+│  │ [NIS Stocks] [USD Stocks]     │  │  │ Horizontal bar, colored by market      │ │
+│  │ [Options (open)]              │  │  │ TASE (indigo) vs US (amber)            │ │
+│  ├── Performance Metrics ────────┤  │  └─────────────────────────────────────────┘ │
+│  │ Table: Portfolio vs S&P 500   │  │                                              │
+│  │ vs TA-125 — Total Return,     │  │                                              │
+│  │ CAGR, Max Drawdown, Sharpe    │  │                                              │
+│  ├── Top Gainers / Top Losers ───┤  │                                              │
+│  │ Side-by-side: top 5 each      │  │                                              │
+│  │ with P&L % pills              │  │                                              │
+│  ├── Currency Exposure ──────────┤  │                                              │
+│  │ NIS / USD weight table        │  │                                              │
+│  └───────────────────────────────┘  │                                              │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Rendered via `statistics_view.render(portfolio, prices, price_date)`. Key design decisions:
 
+- **Two-column layout** — compact stats on the left (1/3), visual charts on the right (2/3)
 - **Portfolio value = stock market value only** — option premiums from short sales are already reflected in cash; not double-counted
 - **Performance metrics** — reuses same computation as Performance tab (daily_portfolio_state → stabilization detection → Total Return, CAGR, Max Drawdown, Sharpe)
-- **Trading activity** — derived from `realized_trades` (win/loss) and `transactions` (trade count, most traded, avg holding period)
-- **Risk metrics** — NIS/USD market concentration, largest single-position exposure as % of portfolio
+- **Comparison table** — Portfolio, S&P 500, and TA-125 shown in a single table with colored labels
+- **Treemap** — portfolio composition colored by P&L %, replacing the old donut chart
 
-### Tab 2: TASE (₪) — full-width NIS positions
+### Tab 2: Performance — historical returns with benchmarks
+
+See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md) for full architectural deep-dive.
+
+```
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│  [Total Return] [CAGR] [Max Drawdown] [Sharpe Ratio]  ← 4 metric cards          │
+│  S&P 500: Total Return +XX.X% | CAGR +XX.X%           ← benchmark captions      │
+│  TA-125:  Total Return +XX.X% | CAGR +XX.X%                                     │
+│  ─────────────────────────────────────────────────                               │
+│  Portfolio Value Over Time (₪)                         ← area chart + gradient   │
+│  ─────────────────────────────────────────────────                               │
+│  Drawdown (Underwater Plot)                            ← red fill, 250px         │
+│  ─────────────────────────────────────────────────                               │
+│  Cumulative Returns vs Benchmarks (base 100)           ← multi-line              │
+│  ─ Portfolio (indigo solid)                                                      │
+│  ─ S&P 500 (amber dashed)                                                       │
+│  ─ TA-125 (pink dashed)                                                          │
+│  ─────────────────────────────────────────────────                               │
+│  [Monthly Returns (bar)]    [Rolling Sharpe (60d)]     ← side by side            │
+│  ─────────────────────────────────────────────────                               │
+│  Monthly Returns Heatmap (calendar view)               ← year×month grid         │
+│  ─────────────────────────────────────────────────                               │
+│  "Portfolio value is based on cost basis + cumulative realized P&L.              │
+│   It does not reflect unrealized gains/losses on open positions."                │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `performance_view.render()` (no parameters). Key design decisions:
+
+- **6 charts** — portfolio value area, drawdown underwater, cumulative returns vs benchmarks, monthly returns bar, rolling Sharpe ratio, monthly returns heatmap
+- **Historical data only** — charts display stored daily portfolio states; no forward-looking projections or live market value injection
+- **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
+- **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
+- **Valuation method** — cost basis + realized P&L only (consistent with `daily_portfolio_state` methodology)
+- **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 4% risk-free rate, 252 trading days, min 30 data points
+
+### Tab 3: TASE (₪) — full-width NIS positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
-├────────────┬───────────┬──────────┬────────────┬──────────┬───────────────────────┤
-│ Statistics │ TASE (₪)  │  US ($)  │ Merged (₪) │ Options  │ Performance           │
-├────────────┴───────────┴──────────┴────────────┴──────────┴───────────────────────┤
+├────────────┬─────────────┬──────────┬──────────┬────────────┬─────────────────────┤
+│ Statistics │ Performance │ TASE (₪) │  US ($)  │ Merged (₪) │ Options             │
+├────────────┴─────────────┴──────────┴──────────┴────────────┴─────────────────────┤
 │  ┌──── TASE Account (₪) ─────────────────────────────────────────────────┐│
 │  │ [Invested] [Market] [P&L] [P&L%]                                     ││
 │  │ [Cash: ₪ XXX]                                                        ││
+│  │ [Donut pie chart | P&L bar chart]                                   ││
 │  │ Position table (NIS positions, full width)                           ││
-│  │ Pie chart                                                            ││
 │  └──────────────────────────────────────────────────────────────────────┘│
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, title)` — called once per market tab, each at full width.
+Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, title)` — called once per market tab, each at full width. Layout: 4 metric cards → cash card → charts (donut 1/3, P&L bar 2/3) → position table.
 
-### Tab 3: US ($) — full-width USD positions
+### Tab 4: US ($) — full-width USD positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -546,7 +592,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Tab 4: Merged Portfolio (all in ₪)
+### Tab 5: Merged Portfolio (all in ₪)
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -573,7 +619,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 - `USD position value (₪)` = `quantity × price_usd × fx_rate_on_reference_date`
 - `USD cash (₪)` = `usd_cash × fx_rate_on_reference_date`
 
-### Tab 5: Options — open options positions
+### Tab 6: Options — open options positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -591,35 +637,6 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 
 Rendered via `options_view.render(options_nis, options_usd)`. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
 
-### Tab 6: Performance — historical returns with benchmark comparison
-
-```
-┌───────────────────────────────────────────────────────────────────────────┐
-│  [Total Return] [CAGR] [Max Drawdown] [Sharpe Ratio]  ← 4 metric cards  │
-│  S&P 500: Total Return +XX.X% | CAGR +XX.X%           ← benchmark caps  │
-│  TA-125:  Total Return +XX.X% | CAGR +XX.X%                             │
-│  ─────────────────────────────────────────────────                       │
-│  Portfolio Value Over Time (₪)                         ← Plotly chart 1  │
-│  ─────────────────────────────────────────────────                       │
-│  Cumulative Returns vs Benchmarks (base 100)           ← Plotly chart 2  │
-│  ─ Portfolio (blue solid)                                                │
-│  ─ S&P 500 (orange dashed)                                              │
-│  ─ TA-125 (green dashed)                                                │
-│                                                                           │
-│  "Portfolio value is based on cost basis + cumulative realized P&L.      │
-│   It does not reflect unrealized gains/losses on open positions."        │
-└───────────────────────────────────────────────────────────────────────────┘
-```
-
-Rendered via `performance_view.render()` (no parameters). Key design decisions:
-
-- **Historical data only** — charts display stored daily portfolio states; no forward-looking projections or live market value injection
-- **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
-- **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
-- **Valuation method** — cost basis + realized P&L only (consistent with `daily_portfolio_state` methodology)
-- **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 4% risk-free rate, 252 trading days, min 30 data points
-
-See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md) for full architectural deep-dive.
 
 ### Sidebar
 
@@ -693,7 +710,7 @@ repository.save_snapshot()  →  portfolio_snapshots + position_snapshots
 
 ## Historical Analysis
 
-### Performance Tab (implemented — Tab 6)
+### Performance Tab (implemented — Tab 2)
 
 Uses `daily_portfolio_state` to render:
 - **Portfolio Value Over Time** — line chart of cost basis + realized P&L in ₪
@@ -781,39 +798,50 @@ streamlit run app.py
 [x] DB created at data/portfolio.db with 11 tables
 [x] Trans_Input file parsed on first run; all 2065 rows ingested
 
-# Tab 1 — Statistics
-[x] Portfolio Summary: Total Value, P&L, Cash, position counts, allocation donut, top gainers/losers
-[x] Performance Metrics: Total Return, CAGR, Max Drawdown, Sharpe + benchmark captions
-[x] Trading Activity: trade count, realized P&L, win rate, avg holding period, most traded chart
-[x] Risk & Diversification: NIS/USD exposure, largest position, allocation + concentration pies
+# Tab 1 — Statistics (two-column layout)
+[x] Left column: Portfolio Summary (value, cash, P&L, realized P&L, avg holding, position counts)
+[x] Left column: Performance Metrics table (Portfolio vs S&P 500 vs TA-125)
+[x] Left column: Top Gainers / Top Losers with P&L % pills
+[x] Left column: Currency Exposure (NIS/USD weight)
+[x] Right column: Treemap composition colored by P&L %
+[x] Right column: P&L Breakdown bar chart colored by market (TASE/US)
 [x] Portfolio value = stocks only (option premiums already in cash, not double-counted)
 
-# Tab 2 — TASE (₪)
+# Tab 2 — Performance (6 charts)
+[x] 4 metric cards: Total Return, CAGR, Max Drawdown, Sharpe Ratio
+[x] Benchmark captions for S&P 500 and TA-125
+[x] Portfolio Value Over Time area chart with gradient fill (₪)
+[x] Drawdown underwater plot
+[x] Cumulative Returns vs Benchmarks chart (base 100)
+[x] Monthly Returns bar chart + Rolling Sharpe (60d) side by side
+[x] Monthly Returns Heatmap (calendar view)
+[x] Stabilization detection skips initial build-up period
+[x] Historical data only — no forward-looking projections
+[x] Benchmark data cached in benchmark_cache table
+
+# Tab 3 — TASE (₪)
 [x] Full-width NIS positions with cash card visible
+[x] Donut pie chart + P&L horizontal bar chart
 [x] NIS cash ≈ last 'balance' value in original Excel (יתרה שקלית column)
 
-# Tab 3 — US ($)
+# Tab 4 — US ($)
 [x] Full-width USD positions with cash card visible
+[x] Donut pie chart + P&L horizontal bar chart
 
-# Tab 4 — Merged (₪)
+# Tab 5 — Merged (₪)
 [x] All positions shown in ₪
 [x] USD position cost uses historical FX rate (not today's rate)
 [x] USD position value uses FX rate on reference date
 [x] NIS cash + USD cash (converted) both displayed
 [x] Historical USD/ILS rate for reference date shown
+[x] Donut pie chart + P&L bar chart colored by market
 
-# Tab 5 — Options
+# Tab 6 — Options
 [x] NIS and USD options positions displayed separately
+[x] Direction badges (LONG/SHORT/CLOSED)
+[x] Toggle: open positions only
+[x] Interactive table toggle
 [x] Empty state handled gracefully
-
-# Tab 6 — Performance
-[x] 4 metric cards: Total Return, CAGR, Max Drawdown, Sharpe Ratio
-[x] Benchmark captions for S&P 500 and TA-125
-[x] Portfolio Value Over Time chart (₪)
-[x] Cumulative Returns vs Benchmarks chart (base 100)
-[x] Stabilization detection skips initial build-up period
-[x] Historical data only — no forward-looking projections
-[x] Benchmark data cached in benchmark_cache table
 
 # Import
 [x] Upload same Excel via sidebar → "0 new rows, 2065 duplicates"

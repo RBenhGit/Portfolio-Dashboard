@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # ── App config ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="IBI Portfolio Dashboard",
+    page_title="Portfolio Dashboard",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -155,7 +155,7 @@ with st.sidebar:
 
 
 # ── Main content ─────────────────────────────────────────────────────────────
-st.title("📈 IBI Portfolio Dashboard")
+st.title("📈 Portfolio Dashboard")
 
 portfolio = _get_portfolio()
 positions_nis = portfolio.get("positions_nis", {})
@@ -174,8 +174,8 @@ prices = _get_prices(
     price_date,
 )
 
-tab_stats, tab_tase, tab_us, tab_merged, tab_options, tab_performance = st.tabs(
-    ["📊 Statistics", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options", "📈 Performance"]
+tab_stats, tab_performance, tab_tase, tab_us, tab_merged, tab_options = st.tabs(
+    ["📊 Statistics", "📈 Performance", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options"]
 )
 
 with tab_stats:

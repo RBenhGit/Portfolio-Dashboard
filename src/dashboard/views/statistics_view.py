@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -95,16 +94,50 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
         1 for pos in options_usd.values() if abs(pos.quantity) > 0.001
     )
 
-    alloc_labels = ["NIS Stocks", "USD Stocks", "Cash"]
     alloc_values = [nis_stock_value, usd_stock_value, total_cash]
     total_stock_value = nis_stock_value + usd_stock_value
     nis_pct = (nis_stock_value / total_stock_value * 100) if total_stock_value else 0.0
     usd_pct = (usd_stock_value / total_stock_value * 100) if total_stock_value else 0.0
 
+    # --- Realized P&L & Avg Holding (pre-compute for summary) ---
+    realized_trades = repository.get_realized_trades()
+    all_transactions = repository.get_all_transactions()
+
+    cum_realized_nis = portfolio.get("cum_realized_pnl_nis", 0.0)
+    cum_realized_usd = portfolio.get("cum_realized_pnl_usd", 0.0)
+    total_realized_nis = cum_realized_nis + cum_realized_usd * fx
+
+    avg_holding_days = None
+    if realized_trades:
+        holding_days_list = []
+        earliest_buy: dict[str, datetime.date] = {}
+        for t in all_transactions:
+            if t["effect"] == "buy":
+                sym = t["security_symbol"]
+                tdate = t["date"]
+                if sym and tdate:
+                    if isinstance(tdate, str):
+                        tdate = datetime.date.fromisoformat(tdate)
+                    if sym not in earliest_buy or tdate < earliest_buy[sym]:
+                        earliest_buy[sym] = tdate
+
+        for rt in realized_trades:
+            sym = rt["security_symbol"]
+            sell_date = rt["date"]
+            if sym and sell_date and sym in earliest_buy:
+                if isinstance(sell_date, str):
+                    sell_date = datetime.date.fromisoformat(sell_date)
+                days = (sell_date - earliest_buy[sym]).days
+                if days >= 0:
+                    holding_days_list.append(days)
+
+        if holding_days_list:
+            avg_holding_days = sum(holding_days_list) / len(holding_days_list)
+
     # =====================================================================
     # TWO-COLUMN LAYOUT: Stats (left) | Charts (right)
     # =====================================================================
-    col_stats, col_charts = st.columns([2, 3])
+    col_stats, col_charts = st.columns([1, 2])
 
     # -----------------------------------------------------------------
     # LEFT COLUMN — All statistics / metrics / tables
@@ -118,17 +151,26 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
                                          f"₪{total_portfolio_value:,.0f}"),
                         unsafe_allow_html=True)
         with s2:
+            st.markdown(metric_card_html("Total Cash", f"₪{total_cash:,.0f}"),
+                        unsafe_allow_html=True)
+        s3, s4 = st.columns(2)
+        with s3:
             pnl_delta = f"₪{total_pnl:+,.0f}"
             st.markdown(metric_card_html("Total P&L", f"₪{total_pnl:,.0f}",
                                          delta=pnl_delta),
                         unsafe_allow_html=True)
-        s3, s4 = st.columns(2)
-        with s3:
+        with s4:
             st.markdown(metric_card_html("P&L %", f"{total_pnl_pct:+.1f}%",
                                          delta=f"{total_pnl_pct:+.1f}%"),
                         unsafe_allow_html=True)
-        with s4:
-            st.markdown(metric_card_html("Total Cash", f"₪{total_cash:,.0f}"),
+        s5, s6 = st.columns(2)
+        with s5:
+            st.markdown(metric_card_html("Realized P&L",
+                                         f"₪{total_realized_nis:,.0f}"),
+                        unsafe_allow_html=True)
+        with s6:
+            holding_str = f"{avg_holding_days:.0f}d" if avg_holding_days is not None else "N/A"
+            st.markdown(metric_card_html("Avg Holding", holding_str),
                         unsafe_allow_html=True)
 
         # Position counts
@@ -167,15 +209,16 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
                 max_dd = compute_max_drawdown(port_series)
                 sharpe = compute_sharpe_ratio(port_series)
 
-                p1, p2 = st.columns(2)
-                p1.metric("Total Return", f"{total_return:+.1f}%")
-                p2.metric("CAGR", f"{cagr:+.1f}%")
-                p3, p4 = st.columns(2)
-                p3.metric("Max Drawdown", f"{max_dd:.1f}%")
-                p4.metric("Sharpe Ratio", f"{sharpe:.2f}")
-
                 start_d = port_series.index[0].strftime("%Y-%m-%d")
                 end_d = port_series.index[-1].strftime("%Y-%m-%d")
+
+                perf_headers = ["", "Total Return", "CAGR", "Max Drawdown", "Sharpe Ratio"]
+                perf_rows = [
+                    [f'<span style="color:{theme.ACCENT_PRIMARY};font-weight:600;">Portfolio</span>',
+                     f"{total_return:+.1f}%", f"{cagr:+.1f}%",
+                     f"{max_dd:.1f}%", f"{sharpe:.2f}"],
+                ]
+
                 bm_colors = {"S&P 500": theme.BM_SP500, "TA-125": theme.BM_TA125}
                 for bm_name in BENCHMARKS:
                     bm_data = fetch_benchmark(bm_name, start_d, end_d)
@@ -185,92 +228,23 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
                         bm_s = bm_s.sort_index()
                         bm_ret = (bm_s.iloc[-1] / bm_s.iloc[0] - 1) * 100
                         bm_cagr = compute_cagr(bm_s)
+                        bm_dd = compute_max_drawdown(bm_s)
                         bm_color = bm_colors.get(bm_name, theme.TEXT_SECONDARY)
-                        st.markdown(
-                            f'<span style="color:{bm_color};font-weight:600;">'
-                            f'{bm_name}</span>'
-                            f' Return: <b>{bm_ret:+.1f}%</b>'
-                            f' | CAGR: <b>{bm_cagr:+.1f}%</b>',
+                        perf_rows.append([
+                            f'<span style="color:{bm_color};font-weight:600;">{bm_name}</span>',
+                            f"{bm_ret:+.1f}%", f"{bm_cagr:+.1f}%",
+                            f"{bm_dd:.1f}%", "\u2014",
+                        ])
+
+                st.markdown(html_table(perf_headers, perf_rows, ["l", "r", "r", "r", "r"]),
                             unsafe_allow_html=True)
             else:
                 st.info("Not enough data for performance metrics.")
         else:
             st.info("No daily portfolio data yet.")
 
-        # --- Trading Activity ---
-        st.markdown(section_header("Trading Activity"), unsafe_allow_html=True)
-
-        realized_trades = repository.get_realized_trades()
-        all_transactions = repository.get_all_transactions()
-        trade_txns = [
-            t for t in all_transactions if t["effect"] in ("buy", "sell")
-        ]
-        total_trades = len(trade_txns)
-
-        cum_realized_nis = portfolio.get("cum_realized_pnl_nis", 0.0)
-        cum_realized_usd = portfolio.get("cum_realized_pnl_usd", 0.0)
-        total_realized_nis = cum_realized_nis + cum_realized_usd * fx
-
-        wins = sum(1 for rt in realized_trades if rt["realized_pnl"] > 0)
-        losses = sum(1 for rt in realized_trades if rt["realized_pnl"] < 0)
-        win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0.0
-
-        avg_holding_days = None
-        if realized_trades:
-            holding_days_list = []
-            earliest_buy: dict[str, datetime.date] = {}
-            for t in all_transactions:
-                if t["effect"] == "buy":
-                    sym = t["security_symbol"]
-                    tdate = t["date"]
-                    if sym and tdate:
-                        if isinstance(tdate, str):
-                            tdate = datetime.date.fromisoformat(tdate)
-                        if sym not in earliest_buy or tdate < earliest_buy[sym]:
-                            earliest_buy[sym] = tdate
-
-            for rt in realized_trades:
-                sym = rt["security_symbol"]
-                sell_date = rt["date"]
-                if sym and sell_date and sym in earliest_buy:
-                    if isinstance(sell_date, str):
-                        sell_date = datetime.date.fromisoformat(sell_date)
-                    days = (sell_date - earliest_buy[sym]).days
-                    if days >= 0:
-                        holding_days_list.append(days)
-
-            if holding_days_list:
-                avg_holding_days = sum(holding_days_list) / len(holding_days_list)
-
-        e1, e2 = st.columns(2)
-        e1.metric("Total Trades", total_trades)
-        e2.metric("Realized P&L", f"₪{total_realized_nis:,.0f}")
-        e3, e4 = st.columns(2)
-        e3.metric(
-            "Win Rate",
-            f"{win_rate:.0f}% ({wins}W/{losses}L)" if (wins + losses) > 0 else "N/A",
-        )
-        e4.metric(
-            "Avg Holding",
-            f"{avg_holding_days:.0f}d" if avg_holding_days is not None else "N/A",
-        )
-
-        # --- Risk & Diversification ---
-        st.markdown(section_header("Risk & Diversification"), unsafe_allow_html=True)
-
-        largest_label = "N/A"
-        largest_pct = 0.0
-        if rows and total_portfolio_value > 0:
-            largest = max(rows, key=lambda r: r["value"])
-            largest_label = largest["label"]
-            largest_pct = largest["value"] / total_portfolio_value * 100
-
-        f1, f2 = st.columns(2)
-        f1.metric("NIS Exposure", f"{nis_pct:.1f}%")
-        f2.metric("USD Exposure", f"{usd_pct:.1f}%")
-        st.metric("Largest Position", f"{largest_label} ({largest_pct:.1f}%)")
-
         # --- Top Gainers / Losers (side by side) ---
+        st.markdown(section_header("Top Gainers / Top Losers"), unsafe_allow_html=True)
         if rows:
             sorted_rows = sorted(rows, key=lambda r: r["pnl_pct"], reverse=True)
             top_gainers = [r for r in sorted_rows[:5] if r["pnl_pct"] > 0]
@@ -310,35 +284,35 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
                 else:
                     st.info("No losses.")
 
+        # --- Currency Exposure (tabulated) ---
+        st.markdown(section_header("Currency Exposure"), unsafe_allow_html=True)
+        if total_stock_value > 0:
+            exp_headers = ["Currency", "Weight"]
+            exp_rows = [
+                [f'<span style="color:{theme.ACCENT_PRIMARY};font-weight:600;">NIS</span>',
+                 f"{nis_pct:.1f}%"],
+                [f'<span style="color:{theme.BM_SP500};font-weight:600;">USD</span>',
+                 f"{usd_pct:.1f}%"],
+            ]
+            st.markdown(html_table(exp_headers, exp_rows, ["l", "r"]),
+                        unsafe_allow_html=True)
+        else:
+            st.info("No stock positions.")
+
     # -----------------------------------------------------------------
     # RIGHT COLUMN — All charts / graphs
     # -----------------------------------------------------------------
     with col_charts:
-        # --- Asset Allocation ---
-        st.markdown(section_header("Asset Allocation"), unsafe_allow_html=True)
-
+        # --- Portfolio Composition Treemap ---
         if sum(alloc_values) > 0:
-            chart_type = st.radio("Allocation view", ["Donut", "Treemap"],
-                                  horizontal=True, key="stats_alloc_type")
-            if chart_type == "Treemap":
-                all_positions = {**positions_nis, **positions_usd}
-                fig_alloc = allocation_treemap(all_positions, prices, "₪",
-                                              "Portfolio Composition",
-                                              fx_rate=fx)
-                if fig_alloc:
-                    fig_alloc.update_layout(height=280)
-                    st.plotly_chart(fig_alloc, use_container_width=True,
-                                    key="alloc_treemap")
-            else:
-                fig_alloc = px.pie(
-                    names=alloc_labels, values=alloc_values,
-                    hole=0.45, title="Asset Allocation",
-                    color_discrete_sequence=theme.CHART_COLORS,
-                )
-                fig_alloc.update_traces(textinfo="percent+label")
-                fig_alloc.update_layout(height=300)
+            all_positions = {**positions_nis, **positions_usd}
+            fig_alloc = allocation_treemap(all_positions, prices, "₪",
+                                          "Portfolio Composition",
+                                          fx_rate=fx)
+            if fig_alloc:
+                fig_alloc.update_layout(height=280)
                 st.plotly_chart(fig_alloc, use_container_width=True,
-                                key="alloc_summary")
+                                key="alloc_treemap")
 
         # --- P&L Breakdown bar chart (all in ₪, colored by market) ---
         if rows:
@@ -376,20 +350,3 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
                     legend=dict(orientation="h", y=1.02, yanchor="bottom"),
                 )
                 st.plotly_chart(fig_pnl, use_container_width=True)
-
-        # --- Currency Exposure (tabulated) ---
-        st.markdown(section_header("Currency Exposure"), unsafe_allow_html=True)
-        if total_stock_value > 0:
-            exp_headers = ["Currency", "Value ₪", "Weight"]
-            exp_rows = [
-                [f'<span style="color:{theme.ACCENT_PRIMARY};font-weight:600;">NIS</span>',
-                 f"₪{nis_stock_value:,.0f}",
-                 f"{nis_pct:.1f}%"],
-                [f'<span style="color:{theme.BM_SP500};font-weight:600;">USD</span>',
-                 f"₪{usd_stock_value:,.0f}",
-                 f"{usd_pct:.1f}%"],
-            ]
-            st.markdown(html_table(exp_headers, exp_rows, ["l", "r", "r"]),
-                        unsafe_allow_html=True)
-        else:
-            st.info("No stock positions.")
