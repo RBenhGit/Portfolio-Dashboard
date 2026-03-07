@@ -97,7 +97,7 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md # Performance tab deep-dive
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf          # IBI API reference
-├── tests/                              # Test suite (88 tests)
+├── tests/                              # Test suite (91 tests)
 │   ├── test_builder.py                 # Portfolio build logic
 │   ├── test_classifier.py              # Transaction classification
 │   ├── test_performance_metrics.py     # Metric calculations
@@ -370,7 +370,7 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 ### Pre-processing (before sequential pass)
 
 1. **Sort** all transactions by date ASC (IBI exports date-DESC)
-2. **Options expiry reordering:** IBI records the sell *before* the deposit for options expiry (הפקדה פקיעה). This causes an "insufficient shares" error. Fix: for options symbols (8-digit codes starting 83/84/85), move any הפקדה פקיעה deposit to one day before the earliest sell of that symbol.
+2. **Options expiry reordering:** IBI records the sell *before* the deposit for options expiry (הפקדה פקיעה). This causes an "insufficient shares" error. Fix: for options symbols (8-digit codes starting with 8 or 9), move any הפקדה פקיעה deposit to one day before the earliest sell of that symbol.
 3. **Filter phantoms:** mark `is_phantom=1` in DB; exclude from position building.
 4. **Fetch FX rates:** for every unique date in the transaction set, ensure `fx_rates` table has a rate. Bulk-fetch missing dates from Twelvedata before the pass begins.
 
@@ -477,11 +477,12 @@ Cache in `price_cache` table: keyed by `(symbol, market, price_date)`. Historica
 ### Symbol Mapper (`src/market/symbol_mapper.py`)
 
 Market detection (in priority order):
-1. `currency == '$'` → US market
-2. `currency == '₪'` AND symbol is 1–6 uppercase letters (regex `^[A-Z]{1,6}$`) → US ETF/ADR on TASE
-3. Symbol is numeric (5–8 digits) → TASE
-4. Symbol matches option pattern (`^[89]\d{7}$` or `^ת.*M\d{3}-\d{2}$`) → option, skip pricing
-5. Default: TASE
+1. Symbol is numeric (5–8 digits) → TASE (even if denominated in $, e.g. dollar-linked bonds/ETFs)
+2. `currency == '$'` → US market
+3. `currency == '₪'` AND symbol is 1–6 uppercase letters (regex `^[A-Z]{1,6}$`) → US ETF/ADR on TASE
+4. Default: TASE
+
+Option detection is separate via `is_option()`: `^[89]\d{7}$` or `^ת[A-Z]\d+M\d+-\d+$` → skip pricing.
 
 ---
 

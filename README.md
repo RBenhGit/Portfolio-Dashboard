@@ -184,7 +184,7 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 **Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later.
 
-**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (7 known stocks) → Twelvedata `symbol_search` API → fallback to None.
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (12 known stocks) → Twelvedata `symbol_search` API → fallback to None.
 
 **Stabilization Detection** ([performance_view.py:46-56](src/dashboard/views/performance_view.py#L46-L56)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there.
 
@@ -295,7 +295,7 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
-├── tests/                          # Test suite (88 tests)
+├── tests/                          # Test suite (91 tests)
 │   ├── test_builder.py             # Portfolio build logic tests
 │   ├── test_classifier.py          # Transaction classification tests
 │   ├── test_performance_metrics.py # Metric calculation tests

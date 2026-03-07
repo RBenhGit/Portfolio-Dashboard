@@ -42,14 +42,9 @@ The `_reorder_options_expiry` function only fixes one specific sub-pattern: it m
 | 86158714 | 2025-12-14 | 2025-12-28 | Short sell, close 2 weeks later |
 | 86202934 | 2025-12-25 (7 sells) | Never | Fully short, never closed in data |
 
-### Sub-issue: `86` prefix not covered by `_reorder_options_expiry`
+### Sub-issue: `86` prefix — FIXED
 
-The reorder function at `builder.py:36` only checks prefixes `83`, `84`, `85`:
-```python
-len(sym) == 8 and sym[:2] in ("83", "84", "85")
-```
-
-Two `86`-prefix options (`86158714`, `86202934`) are missed entirely. The `_OPTION_RE` regex in `ibi_classifier.py` correctly identifies options as `^[89]\d{7}$`, but the reorder function uses a narrower filter.
+The reorder function was updated to check the first digit only (`sym[:1] in ("8", "9")`), matching the `_OPTION_RE` pattern (`^[89]\d{7}$`). All 8-digit option symbols starting with 8 or 9 are now covered, including `86`-prefix options like `86158714` and `86202934`.
 
 ---
 
