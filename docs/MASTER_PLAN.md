@@ -55,7 +55,7 @@ src/classifiers/ibi_classifier.py  ← 21 types → effect, direction,
                                       cash_flow_nis, cash_flow_usd
         │
         ▼
-src/database/db.py                 ← SQLite: 11 tables
+src/database/db.py                 ← SQLite: 12 tables
 src/database/repository.py        ← CRUD + dedup insert
         │
         ▼
@@ -120,7 +120,8 @@ Portfolio_Dashboard/
     │   ├── base_classifier.py         # BaseClassifier ABC (broker-agnostic interface)
     │   └── ibi_classifier.py          # IBIClassifier (all 21 IBI types)
     ├── portfolio/
-    │   └── builder.py                 # PortfolioBuilder
+    │   ├── ingestion.py               # Full pipeline: Excel → classify → FX → dedup → build
+    │   └── builder.py                 # Sequential portfolio build + fast-load cache
     ├── market/
     │   ├── price_fetcher.py           # Twelvedata + yfinance fallback
     │   ├── fx_fetcher.py              # USD/ILS historical + current rates
@@ -148,7 +149,7 @@ Portfolio_Dashboard/
 
 ---
 
-## SQLite Schema (11 tables)
+## SQLite Schema (12 tables)
 
 ```sql
 -- All parsed & classified transactions
@@ -245,7 +246,7 @@ CREATE TABLE position_snapshots (
     unrealized_pnl_pct REAL
 );
 
--- Portfolio cost-basis state per transaction date (no price API needed)
+-- Portfolio state per transaction date (cost basis + market values)
 -- Computed during builder pass; gives full historical time-series
 CREATE TABLE daily_portfolio_state (
     date              TEXT PRIMARY KEY,
@@ -262,7 +263,11 @@ CREATE TABLE daily_portfolio_state (
     total_cost_nis    REAL,            -- nis_total_cost + usd_total_cost * fx_rate
     -- Cumulative realized P&L up to this date
     cum_realized_pnl_nis REAL,
-    cum_realized_pnl_usd REAL
+    cum_realized_pnl_usd REAL,
+    -- Market values (from closing prices fetched during build)
+    nis_market_value     REAL,         -- sum(price × qty) for NIS positions
+    usd_market_value     REAL,         -- sum(price × qty) for USD positions
+    total_market_value_nis REAL        -- (nis_mv + nis_cash) + (usd_mv + usd_cash) * fx
 );
 
 -- Every sell transaction recorded with realized gain/loss
@@ -307,6 +312,13 @@ CREATE TABLE benchmark_cache (
     close      REAL NOT NULL,        -- closing price
     fetched_at TEXT NOT NULL,        -- ISO datetime
     PRIMARY KEY (symbol, date)
+);
+
+-- Fast-load cache: serialized build() result (positions, cash, P&L)
+-- Avoids full sequential rebuild on every app startup
+CREATE TABLE portfolio_current (
+    key   TEXT PRIMARY KEY,          -- 'portfolio'
+    value TEXT NOT NULL              -- JSON blob
 );
 ```
 
@@ -768,7 +780,7 @@ yfinance>=0.2.66
 
 1. ✅ **Scaffolding** — folders, `requirements.txt`, `.env.example`, `.gitignore`
 2. ✅ **Config** — `src/config.py`
-3. ✅ **Database** — `src/database/db.py` (11 tables), `src/database/repository.py`
+3. ✅ **Database** — `src/database/db.py` (12 tables), `src/database/repository.py`
 4. ✅ **Excel reader** — `src/input/excel_reader.py` (read, sort ASC, `row_hash`)
 5. ✅ **Models** — `src/models/transaction.py`, `src/models/position.py`
 6. ✅ **Classifier** — `base_classifier.py` (ABC) + `ibi_classifier.py` (all 21 types + cash flows + cost_basis_nis)
@@ -796,7 +808,7 @@ cp .env.example .env        # add TWELVEDATA_API_KEY
 streamlit run app.py
 
 # Structure
-[x] DB created at data/portfolio.db with 11 tables
+[x] DB created at data/portfolio.db with 12 tables
 [x] Trans_Input file parsed on first run; all 2065 rows ingested
 
 # Tab 1 — Statistics (two-column layout)

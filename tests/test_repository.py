@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS benchmark_cache (
     symbol TEXT NOT NULL, date TEXT NOT NULL, close REAL NOT NULL,
     fetched_at TEXT NOT NULL, PRIMARY KEY (symbol, date)
 );
+CREATE TABLE IF NOT EXISTS portfolio_current (
+    key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
     """)
     return conn
 

@@ -1,7 +1,9 @@
 """All database CRUD operations."""
+import json
 import sqlite3
 from datetime import datetime, timezone
 from src.database.db import get_connection
+from src.models.position import Position
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
@@ -355,3 +357,76 @@ def upsert_tase_symbol(ibi_id: str, td_symbol: str, yf_symbol: str, name: str) -
              datetime.now(timezone.utc).isoformat()),
         )
     conn.close()
+
+
+# ── Portfolio current (fast-load cache) ──────────────────────────────────────
+
+def save_portfolio_current(result: dict) -> None:
+    """Persist the build() result dict to DB for fast reload."""
+    # Serialize Position objects to dicts
+    serializable = {}
+    for key in ("positions_nis", "positions_usd", "options_nis", "options_usd"):
+        positions = result.get(key, {})
+        serializable[key] = {
+            sym: pos.to_snapshot_dict() if isinstance(pos, Position) else pos
+            for sym, pos in positions.items()
+        }
+    for key in ("nis_cash", "usd_cash", "cum_realized_pnl_nis",
+                "cum_realized_pnl_usd", "built_at"):
+        serializable[key] = result.get(key)
+
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_current (key, value) VALUES (?,?)",
+            ("portfolio", json.dumps(serializable)),
+        )
+    conn.close()
+
+
+def load_portfolio_current() -> dict | None:
+    """Load the cached build() result from DB. Returns None if not available."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT value FROM portfolio_current WHERE key='portfolio'"
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+
+    data = json.loads(row["value"])
+
+    # Reconstruct Position objects from dicts
+    for key in ("positions_nis", "positions_usd", "options_nis", "options_usd"):
+        if key in data and isinstance(data[key], dict):
+            data[key] = {
+                sym: Position.from_dict(d) for sym, d in data[key].items()
+            }
+    return data
+
+
+def is_portfolio_stale() -> bool:
+    """Check if cached portfolio is outdated (new import since last build)."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT value FROM portfolio_current WHERE key='portfolio'"
+    ).fetchone()
+    if not row:
+        conn.close()
+        return True
+
+    data = json.loads(row["value"])
+    built_at = data.get("built_at")
+    if not built_at:
+        conn.close()
+        return True
+
+    import_row = conn.execute(
+        "SELECT imported_at FROM import_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+
+    if not import_row:
+        return False  # no imports ever → cached data is valid
+
+    return import_row["imported_at"] > built_at

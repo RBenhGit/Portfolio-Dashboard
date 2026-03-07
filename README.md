@@ -129,7 +129,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 │  Market Data                                                 │
 │  price_fetcher.py + fx_fetcher.py + benchmark_fetcher.py     │
 ├──────────────────────────────────────────────────────────────┤
-│  Data Access (repository.py) + SQLite (db.py, 11 tables)     │
+│  Data Access (repository.py) + SQLite (db.py, 12 tables)     │
 ├──────────────────────────────────────────────────────────────┤
 │  Input (excel_reader.py) + FX (fx_fetcher.py)                │
 ├──────────────────────────────────────────────────────────────┤
@@ -190,7 +190,7 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 **Benchmark Caching** ([benchmark_fetcher.py](src/market/benchmark_fetcher.py)) — S&P 500 and TA-125 prices cached in SQLite `benchmark_cache` table. Fetcher checks cached date ranges and only requests missing periods from yfinance, minimizing API calls. Failures degrade gracefully (logged as warnings).
 
-### Database Schema (SQLite, 11 tables)
+### Database Schema (SQLite, 12 tables)
 
 | Table | Purpose |
 |-------|---------|
@@ -198,13 +198,14 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 | `fx_rates` | Historical USD/ILS rates by date |
 | `price_cache` | Market prices by (symbol, market, price_date) |
 | `metadata` | App-wide key-value store (file mtime, last parse, etc.) |
-| `daily_portfolio_state` | End-of-day portfolio snapshot (invested, cash, P&L) |
+| `daily_portfolio_state` | End-of-day portfolio snapshot (invested, cash, P&L, market values) |
 | `realized_trades` | Per-sell trade details with P&L |
 | `portfolio_snapshots` | Point-in-time portfolio summaries |
 | `position_snapshots` | Holdings within each snapshot |
 | `tase_symbol_map` | IBI numeric ID → Twelvedata/yfinance ticker cache |
 | `import_log` | Import history (file, timestamp, rows added/duped) |
 | `benchmark_cache` | S&P 500 and TA-125 index prices for performance comparison |
+| `portfolio_current` | Serialized build result for fast app startup (avoids full rebuild) |
 
 ### Technology Stack
 
@@ -323,7 +324,7 @@ Portfolio_Dashboard/
     │   ├── ingestion.py            # Full pipeline orchestration
     │   └── builder.py              # Sequential portfolio build loop
     ├── database/
-    │   ├── db.py                   # SQLite schema (11 tables, WAL mode)
+    │   ├── db.py                   # SQLite schema (12 tables, WAL mode)
     │   └── repository.py           # Data access layer (CRUD)
     └── dashboard/
         ├── theme.py                # Color palette, Plotly template (ibi_dark)

@@ -39,3 +39,19 @@ class Position:
             "unrealized_pnl": self.unrealized_pnl,
             "unrealized_pnl_pct": self.unrealized_pnl_pct,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Position":
+        return cls(
+            security_symbol=d["security_symbol"],
+            security_name=d.get("security_name"),
+            market=d.get("market", "TASE"),
+            currency=d.get("currency", "₪"),
+            quantity=d.get("quantity", 0.0),
+            total_invested=d.get("total_invested", 0.0),
+            total_invested_nis=d.get("total_invested_nis", 0.0),
+            market_price=d.get("market_price"),
+            market_value=d.get("market_value"),
+            unrealized_pnl=d.get("unrealized_pnl"),
+            unrealized_pnl_pct=d.get("unrealized_pnl_pct"),
+        )

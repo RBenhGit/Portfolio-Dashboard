@@ -263,7 +263,7 @@ def build(trigger: str = "startup") -> dict:
         if v.quantity > _EPS and not is_option(k, v.security_name)
     }
 
-    return {
+    result = {
         "positions_nis": positions_nis,
         "positions_usd": positions_usd,
         "options_nis": options_nis,
@@ -274,6 +274,8 @@ def build(trigger: str = "startup") -> dict:
         "cum_realized_pnl_usd": cum_realized_pnl_usd,
         "built_at": datetime.now(timezone.utc).isoformat(),
     }
+    repository.save_portfolio_current(result)
+    return result
 
 
 def _empty_summary() -> dict:

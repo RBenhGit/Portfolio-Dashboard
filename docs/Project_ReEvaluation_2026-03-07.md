@@ -16,7 +16,7 @@ The Portfolio Dashboard codebase is well-aligned with its documentation overall.
 | Area | Doc Says | Code Does | Status |
 |------|----------|-----------|--------|
 | Number of tabs | 6 tabs: Statistics, Performance, TASE, US, Merged, Options | 6 tabs with exact names (app.py:177-179) | Match |
-| Database tables | 11 tables | 11 tables confirmed (db.py:16-163) | Match |
+| Database tables | 12 tables | 12 tables confirmed (db.py:16-168) | Match |
 | Transaction columns | "26 columns" (MASTER_PLAN.md) | 26 columns including `id` autoincrement (db.py:21-48) | Match |
 | Chart functions | 9 Plotly functions | All 9 exist in charts.py | Match |
 | Performance metrics | CAGR 365.25d, Sharpe 4%/√252/min30 | All constants exact (performance_metrics.py) | Match |

@@ -14,7 +14,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def create_schema() -> None:
-    """Create all 11 tables if they don't exist."""
+    """Create all 12 tables if they don't exist."""
     conn = get_connection()
     with conn:
         conn.executescript("""
@@ -159,6 +159,11 @@ CREATE TABLE IF NOT EXISTS benchmark_cache (
     close      REAL NOT NULL,
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (symbol, date)
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_current (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
         """)
 

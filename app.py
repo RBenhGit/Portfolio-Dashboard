@@ -69,8 +69,12 @@ _initial_ingest()
 
 
 # ── Build current portfolio state ─────────────────────────────────────────────
-@st.cache_data(show_spinner="Building portfolio…", ttl=300)
+@st.cache_data(show_spinner="Loading portfolio…", ttl=None)
 def _get_portfolio() -> dict:
+    if not repository.is_portfolio_stale():
+        cached = repository.load_portfolio_current()
+        if cached is not None:
+            return cached
     return builder.build(trigger="display")
 
 
