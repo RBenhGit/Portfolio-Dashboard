@@ -196,13 +196,16 @@ def upsert_daily_state(state: dict) -> None:
             "INSERT OR REPLACE INTO daily_portfolio_state "
             "(date, nis_invested, nis_cash, nis_total_cost, "
             "usd_invested, usd_cash, usd_total_cost, "
-            "fx_rate, total_cost_nis, cum_realized_pnl_nis, cum_realized_pnl_usd) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "fx_rate, total_cost_nis, cum_realized_pnl_nis, cum_realized_pnl_usd, "
+            "nis_market_value, usd_market_value, total_market_value_nis) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (state["date"],
              state.get("nis_invested"), state.get("nis_cash"), state.get("nis_total_cost"),
              state.get("usd_invested"), state.get("usd_cash"), state.get("usd_total_cost"),
              state.get("fx_rate"), state.get("total_cost_nis"),
-             state.get("cum_realized_pnl_nis"), state.get("cum_realized_pnl_usd")),
+             state.get("cum_realized_pnl_nis"), state.get("cum_realized_pnl_usd"),
+             state.get("nis_market_value"), state.get("usd_market_value"),
+             state.get("total_market_value_nis")),
         )
     conn.close()
 

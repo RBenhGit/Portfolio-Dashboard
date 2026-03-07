@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.database import repository
+from src.market.price_fetcher import get_price
 from src.market.symbol_mapper import is_option
 from src.models.position import Position
 
@@ -82,6 +83,20 @@ def build(trigger: str = "startup") -> dict:
         nis_inv = sum(p.total_invested for p in positions_nis.values())
         usd_inv = sum(p.total_invested for p in positions_usd.values())
         fx = repository.get_fx_rate(date) or 3.7   # fallback rate
+
+        # Compute market values from closing prices
+        nis_mv = 0.0
+        for sym, pos in positions_nis.items():
+            px = get_price(sym, pos.market, pos.security_name, date)
+            if px is not None:
+                nis_mv += px * pos.quantity
+
+        usd_mv = 0.0
+        for sym, pos in positions_usd.items():
+            px = get_price(sym, pos.market, pos.security_name, date)
+            if px is not None:
+                usd_mv += px * pos.quantity
+
         repository.upsert_daily_state({
             "date":                date,
             "nis_invested":        nis_inv,
@@ -94,6 +109,9 @@ def build(trigger: str = "startup") -> dict:
             "total_cost_nis":      (nis_inv + nis_cash) + (usd_inv + usd_cash) * fx,
             "cum_realized_pnl_nis": cum_realized_pnl_nis,
             "cum_realized_pnl_usd": cum_realized_pnl_usd,
+            "nis_market_value":       nis_mv,
+            "usd_market_value":       usd_mv,
+            "total_market_value_nis": (nis_mv + nis_cash) + (usd_mv + usd_cash) * fx,
         })
 
     for tx in transactions:

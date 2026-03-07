@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS position_snapshots (
 CREATE TABLE IF NOT EXISTS daily_portfolio_state (
     date TEXT PRIMARY KEY, nis_invested REAL, nis_cash REAL, nis_total_cost REAL,
     usd_invested REAL, usd_cash REAL, usd_total_cost REAL,
-    fx_rate REAL, total_cost_nis REAL, cum_realized_pnl_nis REAL, cum_realized_pnl_usd REAL
+    fx_rate REAL, total_cost_nis REAL, cum_realized_pnl_nis REAL, cum_realized_pnl_usd REAL,
+    nis_market_value REAL, usd_market_value REAL, total_market_value_nis REAL
 );
 CREATE TABLE IF NOT EXISTS realized_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

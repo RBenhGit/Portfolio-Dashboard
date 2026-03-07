@@ -12,9 +12,13 @@ from typing import Optional
 
 import requests
 
+import re
+
 from src.config import TWELVEDATA_API_KEY, YFINANCE_ENABLED
 from src.database import repository
-from src.market.symbol_mapper import is_option, tase_yfinance_symbol, twelvedata_params
+from src.market.symbol_mapper import is_option, resolve_tase_symbol, tase_yfinance_symbol, twelvedata_params
+
+_TASE_NUM_RE = re.compile(r'^\d{5,8}$')
 
 logger = logging.getLogger(__name__)
 _TD_BASE = "https://api.twelvedata.com"
@@ -47,6 +51,16 @@ def _fetch_historical(symbol: str, market: str,
     """Fetch the closing price for *symbol* on *price_date*."""
     global _last_source
 
+    # For TASE numeric IDs, resolve first — skip all API calls if unresolvable
+    if market == "TASE" and _TASE_NUM_RE.match(symbol):
+        resolved = resolve_tase_symbol(symbol, security_name)
+        if not resolved:
+            logger.warning(
+                "Skipping price fetch for unresolvable TASE ID %s (%s) on %s",
+                symbol, security_name or "unknown", price_date,
+            )
+            return None
+
     if TWELVEDATA_API_KEY:
         try:
             p = _fetch_td_historical(symbol, market, security_name, price_date)
@@ -59,7 +73,7 @@ def _fetch_historical(symbol: str, market: str,
 
     if YFINANCE_ENABLED:
         try:
-            p = _fetch_yf_historical(symbol, market, price_date)
+            p = _fetch_yf_historical(symbol, market, security_name, price_date)
             if p is not None:
                 _last_source = "yfinance"
                 return p
@@ -111,11 +125,12 @@ def _fetch_td_historical(symbol: str, market: str,
 
 
 def _fetch_yf_historical(symbol: str, market: str,
+                         security_name: Optional[str] = None,
                          price_date: str = "") -> Optional[float]:
     """Fetch closing price from yfinance for a specific date."""
     import yfinance as yf
 
-    yf_sym = tase_yfinance_symbol(symbol) if market == "TASE" else symbol
+    yf_sym = tase_yfinance_symbol(symbol, security_name) if market == "TASE" else symbol
     logger.info("yfinance fetching historical %s for %s (original=%s)",
                 yf_sym, price_date, symbol)
 

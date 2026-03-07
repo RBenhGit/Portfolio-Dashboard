@@ -21,13 +21,18 @@ _OPTION_NAME_RE = re.compile(r'^ת[A-Z]\d+M\d+-\d+$')  # e.g. תP001440M212-35
 
 # Known IBI numeric ID → Twelvedata ticker (static fallback)
 _KNOWN_TASE_MAP: dict[str, dict] = {
-    "288019": {"td": "SCOP",  "yf": "SCOP.TA",  "name": "Scope Metals Group"},
-    "445015": {"td": "MTRX",  "yf": "MTRX.TA",  "name": "Matrix IT"},
-    "507012": {"td": "CMDR",  "yf": "CMDR.TA",  "name": "Computer Direct"},
-    "695437": {"td": "MZTF",  "yf": "MZTF.TA",  "name": "Mizrahi Tefahot Bank"},
-    "1176593": {"td": "NXSN", "yf": "NXSN.TA",  "name": "Next Vision Stabilized Systems"},
-    "315010": {"td": "FBRT",  "yf": "FBRT.TA",  "name": "FMS Enterprises Migun"},
-    "1083955": {"td": "QLTU", "yf": "QLTU.TA",  "name": "QualiTau"},
+    "288019":  {"td": "SCOP",     "yf": "SCOP.TA",     "name": "Scope Metals Group"},
+    "445015":  {"td": "MTRX",     "yf": "MTRX.TA",     "name": "Matrix IT"},
+    "507012":  {"td": "CMDR",     "yf": "CMDR.TA",     "name": "Computer Direct"},
+    "695437":  {"td": "MZTF",     "yf": "MZTF.TA",     "name": "Mizrahi Tefahot Bank"},
+    "1176593": {"td": "NXSN",     "yf": "NXSN.TA",     "name": "Next Vision Stabilized Systems"},
+    "315010":  {"td": "FBRT",     "yf": "FBRT.TA",     "name": "FMS Enterprises Migun"},
+    "1083955": {"td": "QLTU",     "yf": "QLTU.TA",     "name": "QualiTau"},
+    "1080456": {"td": "RIMO",     "yf": "RIMO.TA",     "name": "Rimoni Industries"},
+    "1080753": {"td": "ILX",      "yf": "ILX.TA",      "name": "Ilex Medical"},
+    "1131523": {"td": "BOTI",     "yf": "BOTI.TA",     "name": "Bonei Hatichon"},
+    "1141464": {"td": "MRIN",     "yf": "MRIN.TA",     "name": "Y.D. More Investments"},
+    "1143718": {"td": "TCH.F139", "yf": "TCH-F139.TA", "name": "Tachlit TA-125 ETF"},
 }
 
 # Runtime cache (populated from DB + API lookups)
@@ -38,12 +43,14 @@ def detect_market(security_symbol: str, currency: str) -> str:
     """Determine TASE vs US market for a security."""
     sym = str(security_symbol or "").strip()
     cur = str(currency or "").strip()
+    # Numeric IDs (5-8 digits) are always TASE instruments,
+    # even if denominated in $ (e.g. dollar-linked bonds/ETFs)
+    if _TASE_NUM_RE.match(sym):
+        return "TASE"
     if cur == "$":
         return "US"
     if cur == "₪" and _US_TICKER_RE.match(sym):
         return "US"   # dual-listed ETF/ADR
-    if _TASE_NUM_RE.match(sym):
-        return "TASE"
     return "TASE"
 
 
@@ -96,27 +103,64 @@ def resolve_tase_symbol(ibi_id: str, security_name: Optional[str] = None) -> dic
     return None
 
 
+# IBI abbreviated Hebrew prefixes → full names for better search results
+_HEBREW_ABBREVS = {
+    "תכ.":  "תכלית ",
+    "קסם.": "קסם ",
+    "הראל.": "הראל ",
+    "מגדל.": "מגדל ",
+    "אנלי.": "אנליסט ",
+    "מיט.":  "מיטב ",
+    "פסג.":  "פסגות ",
+    "אלט.":  "אלטשולר ",
+}
+
+
+def _clean_hebrew_name(name: str) -> str:
+    """Expand IBI abbreviated Hebrew names for better API search.
+
+    E.g. 'תכ.תלבונדשקלי' → 'תכלית תל-בונד שקלי'
+    """
+    cleaned = name.strip()
+    for abbrev, full in _HEBREW_ABBREVS.items():
+        if cleaned.startswith(abbrev):
+            cleaned = full + cleaned[len(abbrev):]
+            break
+    # Insert spaces before capitals and between Hebrew word boundaries
+    # (IBI often concatenates words: 'תלבונדשקלי' → keep as is, API may match)
+    return cleaned
+
+
 def _search_twelvedata(name: str) -> str | None:
-    """Search Twelvedata for a TASE stock by name. Returns ticker or None."""
-    try:
-        resp = requests.get(
-            "https://api.twelvedata.com/symbol_search",
-            params={"symbol": name, "exchange": "TASE", "apikey": TWELVEDATA_API_KEY},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-        for item in data:
-            if item.get("exchange") == "TASE":
-                return item["symbol"]
-    except Exception as exc:
-        logger.warning("Twelvedata symbol search failed for '%s': %s", name, exc)
+    """Search Twelvedata for a TASE stock by name. Returns ticker or None.
+
+    Tries the original name first, then a cleaned-up version.
+    """
+    candidates = [name]
+    cleaned = _clean_hebrew_name(name)
+    if cleaned != name:
+        candidates.append(cleaned)
+
+    for query in candidates:
+        try:
+            resp = requests.get(
+                "https://api.twelvedata.com/symbol_search",
+                params={"symbol": query, "exchange": "TASE", "apikey": TWELVEDATA_API_KEY},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            for item in data:
+                if item.get("exchange") == "TASE":
+                    return item["symbol"]
+        except Exception as exc:
+            logger.warning("Twelvedata symbol search failed for '%s': %s", query, exc)
     return None
 
 
-def tase_yfinance_symbol(tase_id: str) -> str:
+def tase_yfinance_symbol(tase_id: str, security_name: Optional[str] = None) -> str:
     """Resolve IBI ID to yfinance symbol, or fallback to ID.TA."""
-    resolved = resolve_tase_symbol(tase_id)
+    resolved = resolve_tase_symbol(tase_id, security_name)
     if resolved:
         return resolved["yf"]
     return f"{tase_id}.TA"

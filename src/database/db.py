@@ -114,7 +114,10 @@ CREATE TABLE IF NOT EXISTS daily_portfolio_state (
     fx_rate              REAL,
     total_cost_nis       REAL,
     cum_realized_pnl_nis REAL,
-    cum_realized_pnl_usd REAL
+    cum_realized_pnl_usd REAL,
+    nis_market_value     REAL,
+    usd_market_value     REAL,
+    total_market_value_nis REAL
 );
 
 CREATE TABLE IF NOT EXISTS realized_trades (
@@ -176,5 +179,12 @@ CREATE TABLE IF NOT EXISTS benchmark_cache (
                 PRIMARY KEY (symbol, market, price_date)
             );
         """)
+
+    # daily_portfolio_state: add market value columns
+    dps_cols = {r[1] for r in conn.execute("PRAGMA table_info(daily_portfolio_state)").fetchall()}
+    if "nis_market_value" not in dps_cols:
+        conn.execute("ALTER TABLE daily_portfolio_state ADD COLUMN nis_market_value REAL")
+        conn.execute("ALTER TABLE daily_portfolio_state ADD COLUMN usd_market_value REAL")
+        conn.execute("ALTER TABLE daily_portfolio_state ADD COLUMN total_market_value_nis REAL")
 
     conn.close()

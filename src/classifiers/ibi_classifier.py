@@ -31,12 +31,14 @@ class IBIClassifier(BaseClassifier):
     def _detect_market(self, row: dict) -> str:
         currency = str(row.get("currency", "")).strip()
         sym      = str(row.get("security_symbol", "")).strip()
+        # Numeric IDs (5-8 digits) are always TASE instruments,
+        # even if denominated in $ (e.g. dollar-linked bonds/ETFs)
+        if _TASE_NUMERIC_RE.match(sym):
+            return "TASE"
         if currency == "$":
             return "US"
         if currency == "₪" and _US_TICKER_RE.match(sym):
             return "US"   # dual-listed ETF/ADR on TASE
-        if _TASE_NUMERIC_RE.match(sym):
-            return "TASE"
         return "TASE"
 
     def classify(self, row: dict) -> dict:  # noqa: C901  (complex but intentional)
