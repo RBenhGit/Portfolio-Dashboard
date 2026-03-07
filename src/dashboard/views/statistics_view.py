@@ -188,11 +188,21 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
             dates_perf = []
             values_perf = []
             for row in states:
-                v = (row["total_cost_nis"]
-                     + row["cum_realized_pnl_nis"]
-                     + row["cum_realized_pnl_usd"] * row["fx_rate"])
-                dates_perf.append(row["date"])
-                values_perf.append(v)
+                mv = row["total_market_value_nis"]
+                if mv and mv > 0:
+                    dates_perf.append(row["date"])
+                    values_perf.append(mv)
+
+            # Fall back to book value if market value data is insufficient
+            if len(values_perf) < 2:
+                dates_perf = []
+                values_perf = []
+                for row in states:
+                    v = (row["total_cost_nis"]
+                         + row["cum_realized_pnl_nis"]
+                         + row["cum_realized_pnl_usd"] * row["fx_rate"])
+                    dates_perf.append(row["date"])
+                    values_perf.append(v)
 
             port_series = pd.Series(values_perf, index=pd.to_datetime(dates_perf))
             port_series = port_series[port_series > 0]

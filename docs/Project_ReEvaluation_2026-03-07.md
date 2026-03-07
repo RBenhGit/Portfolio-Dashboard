@@ -41,7 +41,7 @@ The Portfolio Dashboard codebase is well-aligned with its documentation overall.
 
 | Code | File:Line | Notes |
 |------|-----------|-------|
-| `daily_portfolio_state` migration (adds market value columns) | db.py:183-188 | Adds `nis_market_value`, `usd_market_value`, `total_market_value_nis` — not documented in MASTER_PLAN schema |
+| `daily_portfolio_state` migration (adds market value columns) | db.py:183-188 | Adds `nis_market_value`, `usd_market_value`, `total_market_value_nis` — now documented in MASTER_PLAN schema and used for performance metrics |
 | `_OPTION_NAME_RE` pattern for Hebrew options | symbol_mapper.py:20 | `^ת[A-Z]\d+M\d+-\d+$` — now documented in MASTER_PLAN:485 |
 | 5 additional TASE stocks in static map | symbol_mapper.py:28-36 | RIMO, ILX, BOTI, MRIN, TCH.F139 — now documented as 12 stocks |
 | `to_dict()` method on Transaction | models/transaction.py:42-69 | Exists but not documented |
@@ -133,7 +133,7 @@ All 5 documentation inaccuracies have been fixed:
 
 ### Priority 2: Document Undocumented Features
 
-1. **MASTER_PLAN.md schema** — Add the `daily_portfolio_state` migration columns (`nis_market_value`, `usd_market_value`, `total_market_value_nis`)
+1. ~~**MASTER_PLAN.md schema** — Add the `daily_portfolio_state` migration columns (`nis_market_value`, `usd_market_value`, `total_market_value_nis`)~~ Done — columns already in MASTER_PLAN schema (lines 268-270) and now documented in performance-tab-why-how-what.md
 2. **MASTER_PLAN.md file structure** — Add `src/portfolio/ingestion.py` which is missing from the project structure diagram
 
 ### Priority 3: Verify Dead References

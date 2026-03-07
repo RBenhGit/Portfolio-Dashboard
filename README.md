@@ -70,7 +70,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 | Metric | Formula | Notes |
 |--------|---------|-------|
-| Total Return | `(end / start - 1) × 100` | Cost basis + realized P&L only |
+| Total Return | `(end / start - 1) × 100` | Market value (mark-to-market); falls back to book value if prices unavailable |
 | CAGR | `(end / start)^(1/years) - 1` | Uses 365.25 days/year |
 | Max Drawdown | `min((series - cummax) / cummax)` | Peak-to-trough decline % |
 | Sharpe Ratio | `mean(excess) / std(excess) × √252` | 4% risk-free rate, min 30 data points |
@@ -99,7 +99,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 ### Limitations
 
-- Portfolio value is **cost basis + realized P&L only** — unrealized gains/losses are shown separately per position but not in the Performance tab's historical series
+- Performance metrics use **market value** (mark-to-market) when price data is available, falling back to cost basis + realized P&L when insufficient prices are cached
 - Performance charts end at the **last transaction date**, not today's date
 - Sharpe Ratio uses a **hardcoded 4% risk-free rate** and requires ≥30 data points
 - Only **2 benchmarks** supported (S&P 500, TA-125); adding more requires editing `BENCHMARKS` dict

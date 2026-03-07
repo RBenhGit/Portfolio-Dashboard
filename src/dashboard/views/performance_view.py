@@ -82,11 +82,12 @@ def render() -> None:
             bm_series = bm_series.sort_index()
             benchmarks[bm_name] = bm_series
 
-    # ── Metric cards ─────────────────────────────────────────────────────────
-    total_return = (portfolio_series.iloc[-1] / portfolio_series.iloc[0] - 1) * 100
-    cagr = compute_cagr(portfolio_series)
-    max_dd = compute_max_drawdown(portfolio_series)
-    sharpe = compute_sharpe_ratio(portfolio_series)
+    # ── Metric cards (prefer market value; fall back to book value) ─────────
+    metrics_series = market_value_series if len(market_value_series) >= 2 else portfolio_series
+    total_return = (metrics_series.iloc[-1] / metrics_series.iloc[0] - 1) * 100
+    cagr = compute_cagr(metrics_series)
+    max_dd = compute_max_drawdown(metrics_series)
+    sharpe = compute_sharpe_ratio(metrics_series)
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Return", f"{total_return:+.1f}%")
@@ -114,7 +115,7 @@ def render() -> None:
     st.plotly_chart(fig_value, use_container_width=True)
 
     # ── Chart 2: Drawdown (Underwater Plot) ──────────────────────────────────
-    fig_dd = drawdown_chart(portfolio_series)
+    fig_dd = drawdown_chart(metrics_series)
     st.plotly_chart(fig_dd, use_container_width=True)
 
     # ── Benchmark line styles (shared by charts below) ───────────────────────
@@ -294,12 +295,12 @@ def render() -> None:
     col1, col2 = st.columns(2)
 
     with col1:
-        fig_monthly = monthly_returns_bar(portfolio_series)
+        fig_monthly = monthly_returns_bar(metrics_series)
         if fig_monthly:
             st.plotly_chart(fig_monthly, use_container_width=True)
 
     with col2:
-        fig_sharpe = rolling_sharpe_chart(portfolio_series)
+        fig_sharpe = rolling_sharpe_chart(metrics_series)
         if fig_sharpe:
             st.plotly_chart(fig_sharpe, use_container_width=True)
 

@@ -573,8 +573,9 @@ See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md)
 │  ─────────────────────────────────────────────────                               │
 │  Monthly Returns Heatmap (calendar view)               ← year×month grid         │
 │  ─────────────────────────────────────────────────                               │
-│  "Portfolio value is based on cost basis + cumulative realized P&L.              │
-│   It does not reflect unrealized gains/losses on open positions."                │
+│  "Invested Capital charts show cost basis + realized P&L.                        │
+│   Cumulative Returns charts show actual market value including unrealized        │
+│   gains/losses."                                                                 │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -584,7 +585,7 @@ Rendered via `performance_view.render()` (no parameters). Key design decisions:
 - **Historical data only** — charts display stored daily portfolio states; no forward-looking projections or live market value injection
 - **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
 - **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
-- **Valuation method** — cost basis + realized P&L only (consistent with `daily_portfolio_state` methodology)
+- **Valuation method** — performance metrics (Total Return, CAGR, Sharpe, Drawdown) use **market value** (mark-to-market) when available, falling back to book value (cost basis + realized P&L); "Invested Capital" charts use book value
 - **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 4% risk-free rate, 252 trading days, min 30 data points
 
 ### Tab 3: TASE (₪) — full-width NIS positions
@@ -741,12 +742,12 @@ repository.save_snapshot()  →  portfolio_snapshots + position_snapshots
 ### Performance Tab (implemented — Tab 2)
 
 Uses `daily_portfolio_state` to render:
-- **Portfolio Value Over Time** — line chart of cost basis + realized P&L in ₪
-- **Cumulative Returns vs Benchmarks** — base-100 normalized comparison against S&P 500 and TA-125
-- **Key Metrics** — Total Return, CAGR, Max Drawdown, Sharpe Ratio
+- **Invested Capital Over Time** — area chart of cost basis + realized P&L in ₪ (book value)
+- **Cumulative Returns vs Benchmarks** — base-100 normalized comparison against S&P 500 and TA-125 (market value)
+- **Key Metrics** — Total Return, CAGR, Max Drawdown, Sharpe Ratio (computed from market value series; falls back to book value if market data insufficient)
 - Stabilization detection auto-skips initial build-up period
 
-### From `daily_portfolio_state` (cost basis, no price API):
+### From `daily_portfolio_state` (cost basis + market value):
 - Total capital deployed over time (line chart) ✅ (Performance tab)
 - NIS cash + USD cash over time
 - Net inflows vs reinvested proceeds
