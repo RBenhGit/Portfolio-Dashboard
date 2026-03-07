@@ -1,7 +1,7 @@
 # Project Re-Evaluation Report
 **Date:** 2026-03-07
 **Focus:** Full Project
-**Branch:** feature/ui-redesign
+**Branch:** main
 
 ## Executive Summary
 
@@ -46,7 +46,11 @@ The Portfolio Dashboard codebase is well-aligned with its documentation overall.
 | 5 additional TASE stocks in static map | symbol_mapper.py:28-36 | RIMO, ILX, BOTI, MRIN, TCH.F139 — now documented as 12 stocks |
 | `to_dict()` method on Transaction | models/transaction.py:42-69 | Exists but not documented |
 | `to_snapshot_dict()` method on Position | models/position.py:27-41 | Exists but not documented |
+| `from_dict()` classmethod on Position | models/position.py:43-57 | Reconstructs Position from dict (used by fast-load cache) |
 | Position `average_cost` as @property | models/position.py:23-25 | Computed property, not stored field |
+| Fast-load cache functions | repository.py:362-432 | `save_portfolio_current()`, `load_portfolio_current()`, `is_portfolio_stale()` |
+| `portfolio_current` table | db.py:163-166 | Fast-load cache table for serialized build result |
+| Cache check in `_get_portfolio()` | app.py:74-77 | Checks staleness before falling back to full build |
 
 ### Dead References
 

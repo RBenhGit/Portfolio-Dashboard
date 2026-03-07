@@ -447,7 +447,21 @@ for tx in sorted_transactions:
         current_date = tx.date
 
 # Filter: return only positions with quantity > 0.001
+
+# Cache result for fast reload
+repository.save_portfolio_current(result)
 ```
+
+### Fast-Load Cache
+
+After each full build, the result dict (positions, cash, realized P&L, `built_at` timestamp) is serialized to JSON and stored in `portfolio_current` (key=`'portfolio'`). On app startup, `is_portfolio_stale()` compares the `built_at` timestamp against the latest `import_log.imported_at`. If no new imports exist, `load_portfolio_current()` deserializes the cached result and reconstructs `Position` objects via `Position.from_dict()`, skipping the full sequential rebuild entirely.
+
+Staleness check logic:
+- No cache row → stale (full rebuild)
+- No `built_at` in cache → stale
+- No imports ever → fresh (return cache)
+- Latest import after `built_at` → stale
+- Otherwise → fresh (return cache)
 
 ### Cost Basis Rules
 
@@ -710,6 +724,7 @@ repository.insert_transactions_deduped()
 portfolio/builder.py  →  full sequential pass (always from first transaction)
     ├── Writes daily_portfolio_state for every unique date
     ├── Writes realized_trades for every sell
+    ├── Caches result in portfolio_current (JSON) for fast reload
     └── Returns current positions + cash
     │
     ▼
@@ -754,6 +769,7 @@ Uses `daily_portfolio_state` to render:
 
 ## Additional Implementation Details
 
+- **Fast-load cache:** On startup, `app.py` checks `is_portfolio_stale()` before calling `builder.build()`. If the cache is fresh (no new imports since last build), the serialized result is loaded from `portfolio_current` and `Position` objects are reconstructed via `from_dict()`. This avoids the full sequential rebuild on every Streamlit re-run.
 - **Reference date pricing:** `get_max_transaction_date()` returns the latest transaction date from the DB. All price fetches and FX rates use this as the reference date, giving a consistent valuation point tied to the data.
 - **"Prices as of" header:** The dashboard header displays "Prices as of: YYYY-MM-DD" showing the reference date used for all valuations.
 - **Sidebar CSS:** Custom CSS is applied to narrow the sidebar width for a cleaner layout.

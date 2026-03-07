@@ -121,7 +121,8 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 │  theme, styles, charts, position_table, performance_metrics  │
 ├──────────────────────────────────────────────────────────────┤
 │  Portfolio Engine                                            │
-│  builder.py (sequential build) + price_fetcher.py            │
+│  builder.py (sequential build + fast-load cache)             │
+│  + price_fetcher.py                                          │
 ├──────────────────────────────────────────────────────────────┤
 │  Classification & Enrichment                                 │
 │  ibi_classifier.py (21 types) + symbol_mapper.py             │
@@ -187,6 +188,8 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 **TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (12 known stocks) → Twelvedata `symbol_search` API → fallback to None.
 
 **Stabilization Detection** ([performance_view.py:46-56](src/dashboard/views/performance_view.py#L46-L56)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there.
+
+**Fast-Load Cache** ([repository.py](src/database/repository.py), [builder.py](src/portfolio/builder.py)) — After each full build, the result (positions, cash, P&L) is serialized to JSON and stored in the `portfolio_current` table. On app startup, `is_portfolio_stale()` compares `built_at` against the latest `import_log` entry. If no new imports occurred, the cached result is returned instantly, skipping the full sequential rebuild. Position objects are serialized via `to_snapshot_dict()` and reconstructed via `Position.from_dict()`.
 
 **Benchmark Caching** ([benchmark_fetcher.py](src/market/benchmark_fetcher.py)) — S&P 500 and TA-125 prices cached in SQLite `benchmark_cache` table. Fetcher checks cached date ranges and only requests missing periods from yfinance, minimizing API calls. Failures degrade gracefully (logged as warnings).
 
