@@ -46,13 +46,13 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | Tab | Name | Layout | Key Content |
 |-----|------|--------|-------------|
 | 1 | **Statistics** | Two-column (1/3 stats, 2/3 charts) | Portfolio summary (6 metric cards), performance metrics table (vs benchmarks), top 5 gainers/losers, currency exposure, treemap composition, P&L breakdown bar |
-| 2 | **Performance** | Full-width, 6 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; area chart, drawdown, cumulative returns vs benchmarks, monthly returns bar, rolling Sharpe, monthly heatmap |
+| 2 | **Performance** | Full-width, up to 8 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; invested capital area, drawdown, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), US vs TASE splits, monthly returns bar, rolling Sharpe |
 | 3 | **TASE (₪)** | Full-width | NIS positions with cash card, donut pie allocation, P&L bar chart, styled position table |
 | 4 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
 | 5 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
 | 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for interactive table |
 
-### Charts (9 Plotly Functions)
+### Charts (8 Plotly Functions)
 
 | Chart | Function | Height | Description |
 |-------|----------|--------|-------------|
@@ -62,7 +62,6 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | P&L Waterfall | `waterfall_pnl()` | 400px | Cumulative P&L with running total |
 | Area with Gradient | `area_chart_with_gradient()` | 420px | Portfolio value over time with gradient fill |
 | Drawdown Underwater | `drawdown_chart()` | 250px | Red underwater plot showing peak-to-trough decline |
-| Monthly Returns Heatmap | `monthly_returns_heatmap()` | auto | Calendar-style year×month grid colored by return % |
 | Monthly Returns Bar | `monthly_returns_bar()` | 350px | Monthly returns with color-coded gain/loss bars |
 | Rolling Sharpe | `rolling_sharpe_chart()` | 300px | 60-day rolling Sharpe with average line and reference lines |
 
@@ -185,7 +184,7 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 **Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later.
 
-**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (12 known stocks) → Twelvedata `symbol_search` API → fallback to None.
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (12 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
 
 **Stabilization Detection** ([performance_view.py:46-56](src/dashboard/views/performance_view.py#L46-L56)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there.
 
@@ -338,7 +337,7 @@ Portfolio_Dashboard/
         │   └── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
         └── views/
             ├── statistics_view.py  # Tab 1: Two-column layout — stats + charts
-            ├── performance_view.py # Tab 2: 6 charts + benchmark comparison
+            ├── performance_view.py # Tab 2: Up to 8 charts + benchmark comparison
             ├── portfolio_view.py   # Tabs 3-4: Single-market (TASE or US)
             ├── merged_view.py      # Tab 5: All positions in ₪
             └── options_view.py     # Tab 6: Open options with long/short badges

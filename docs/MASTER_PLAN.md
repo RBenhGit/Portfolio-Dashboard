@@ -72,7 +72,7 @@ src/market/fx_fetcher.py           ← Twelvedata historical USD/ILS
         ▼
 app.py → Streamlit
     Tab 1: Statistics — portfolio summary, performance, top gainers/losers
-    Tab 2: Performance — historical returns vs benchmarks (6 charts)
+    Tab 2: Performance — historical returns vs benchmarks (up to 8 charts)
     Tab 3: TASE (₪) — full-width NIS positions
     Tab 4: US ($) — full-width USD positions
     Tab 5: Merged (₪) — all positions converted to shekels
@@ -133,18 +133,18 @@ Portfolio_Dashboard/
         │                              #   section_header, html_table)
         ├── views/
         │   ├── statistics_view.py     # Tab 1: Two-column layout — stats (left) + charts (right)
-        │   ├── performance_view.py    # Tab 2: 6 charts + benchmark comparison
+        │   ├── performance_view.py    # Tab 2: Up to 8 charts + benchmark comparison
         │   ├── portfolio_view.py      # Tabs 3-4: Single-market at full width
         │   ├── merged_view.py         # Tab 5: All positions unified in ₪
         │   └── options_view.py        # Tab 6: Open options with direction badges
         └── components/
             ├── position_table.py      # Reusable styled HTML position table
             ├── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
-            └── charts.py             # 9 Plotly chart functions:
+            └── charts.py             # 8 Plotly chart functions:
                                        #   allocation_pie, pnl_bar, allocation_treemap,
                                        #   waterfall_pnl, area_chart_with_gradient,
-                                       #   drawdown_chart, monthly_returns_heatmap,
-                                       #   monthly_returns_bar, rolling_sharpe_chart
+                                       #   drawdown_chart, monthly_returns_bar,
+                                       #   rolling_sharpe_chart
 ```
 
 ---
@@ -571,8 +571,6 @@ See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md)
 │  ─────────────────────────────────────────────────                               │
 │  [Monthly Returns (bar)]    [Rolling Sharpe (60d)]     ← side by side            │
 │  ─────────────────────────────────────────────────                               │
-│  Monthly Returns Heatmap (calendar view)               ← year×month grid         │
-│  ─────────────────────────────────────────────────                               │
 │  "Invested Capital charts show cost basis + realized P&L.                        │
 │   Cumulative Returns charts show actual market value including unrealized        │
 │   gains/losses."                                                                 │
@@ -581,7 +579,7 @@ See [docs/performance-tab-why-how-what.md](docs/performance-tab-why-how-what.md)
 
 Rendered via `performance_view.render()` (no parameters). Key design decisions:
 
-- **6 charts** — portfolio value area, drawdown underwater, cumulative returns vs benchmarks, monthly returns bar, rolling Sharpe ratio, monthly returns heatmap
+- **Up to 8 charts** — invested capital area, drawdown underwater, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), invested capital US vs TASE, cumulative returns US vs TASE, monthly returns bar, rolling Sharpe ratio
 - **Historical data only** — charts display stored daily portfolio states; no forward-looking projections or live market value injection
 - **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
 - **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
@@ -837,14 +835,16 @@ streamlit run app.py
 [x] Right column: P&L Breakdown bar chart colored by market (TASE/US)
 [x] Portfolio value = stocks only (option premiums already in cash, not double-counted)
 
-# Tab 2 — Performance (6 charts)
+# Tab 2 — Performance (up to 8 charts)
 [x] 4 metric cards: Total Return, CAGR, Max Drawdown, Sharpe Ratio
 [x] Benchmark captions for S&P 500 and TA-125
-[x] Portfolio Value Over Time area chart with gradient fill (₪)
+[x] Invested Capital Over Time area chart with gradient fill (₪)
 [x] Drawdown underwater plot
-[x] Cumulative Returns vs Benchmarks chart (base 100)
+[x] Invested Capital vs Benchmarks chart (base 100, book value)
+[x] Cumulative Returns vs Benchmarks chart (base 100, market value)
+[x] Invested Capital — US vs TASE (base 100)
+[x] Cumulative Returns — US vs TASE (base 100, market value)
 [x] Monthly Returns bar chart + Rolling Sharpe (60d) side by side
-[x] Monthly Returns Heatmap (calendar view)
 [x] Stabilization detection skips initial build-up period
 [x] Historical data only — no forward-looking projections
 [x] Benchmark data cached in benchmark_cache table

@@ -235,45 +235,6 @@ def drawdown_chart(series: pd.Series) -> go.Figure:
     return fig
 
 
-def monthly_returns_heatmap(series: pd.Series) -> Optional[go.Figure]:
-    """Calendar-style monthly returns heatmap."""
-    if len(series) < 30:
-        return None
-
-    monthly = series.resample("ME").last().pct_change() * 100
-    monthly = monthly.dropna()
-    if monthly.empty:
-        return None
-
-    df = pd.DataFrame({
-        "year": monthly.index.year,
-        "month": monthly.index.month,
-        "return": monthly.values,
-    })
-    pivot = df.pivot_table(index="year", columns="month", values="return")
-    month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-    fig = go.Figure(go.Heatmap(
-        z=pivot.values,
-        x=[month_labels[i - 1] for i in pivot.columns],
-        y=pivot.index.astype(str),
-        colorscale=[[0, theme.LOSS], [0.5, theme.BG_SURFACE], [1, theme.PROFIT]],
-        zmid=0,
-        text=[[f"{v:.1f}%" if pd.notna(v) else "" for v in row]
-              for row in pivot.values],
-        texttemplate="%{text}",
-        hovertemplate="Year: %{y}<br>Month: %{x}<br>Return: %{z:.1f}%<extra></extra>",
-    ))
-    fig.update_layout(
-        title="Monthly Returns Heatmap",
-        height=max(200, len(pivot) * 45 + 100),
-        margin=dict(t=50, b=20),
-        yaxis=dict(autorange="reversed"),
-    )
-    return fig
-
-
 def monthly_returns_bar(series: pd.Series) -> Optional[go.Figure]:
     """Monthly returns bar chart."""
     if len(series) < 30:

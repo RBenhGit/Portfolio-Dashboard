@@ -1,6 +1,6 @@
 # Performance Tab — Why · How · What
 
-The Performance tab (Tab 2) provides historical portfolio performance tracking with benchmark comparison for an IBI brokerage portfolio. It computes key financial metrics (Total Return, CAGR, Max Drawdown, Sharpe Ratio) and renders **six interactive Plotly charts** — portfolio value area chart with gradient fill, drawdown underwater plot, cumulative returns vs S&P 500 and TA-125, monthly returns bar chart, rolling Sharpe ratio (60-day window), and monthly returns heatmap. A stabilization detection algorithm automatically skips the initial account build-up period where bulk imports distort the data. The tab displays **only actual historical data** with no forward-looking projections.
+The Performance tab (Tab 2) provides historical portfolio performance tracking with benchmark comparison for an IBI brokerage portfolio. It computes key financial metrics (Total Return, CAGR, Max Drawdown, Sharpe Ratio) and renders **up to eight interactive Plotly charts** — invested capital area chart, drawdown underwater plot, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), invested capital US vs TASE, cumulative returns US vs TASE (market value), monthly returns bar chart, and rolling Sharpe ratio (60-day window). Two chart families are shown: "Invested Capital" charts use book value (cost basis + realized P&L), while "Cumulative Returns" charts use actual market value (mark-to-market). A stabilization detection algorithm automatically skips the initial account build-up period where bulk imports distort the data. The tab displays **only actual historical data** with no forward-looking projections.
 
 ---
 
@@ -63,7 +63,7 @@ An earlier version also injected the current live market value as today's data p
 │  • Aggregation           │     │  • yfinance + SQLite cache│
 │  • Stabilization         │     │  • S&P 500, TA-125       │
 │  • Metrics               │     └───────────────────────────┘
-│  • 6 Charts              │
+│  • 8 Charts              │
 └──────────┬───────────────┘
            │ calls
            ▼
@@ -73,10 +73,8 @@ An earlier version also injected the current live market value as today's data p
 │  • compute_max_drawdown  │     │    gradient               │
 │  • compute_sharpe_ratio  │     │  • drawdown_chart         │
 │  • compute_cumulative_   │     │  • monthly_returns_bar    │
-│    returns               │     │  • monthly_returns_       │
-└──────────────────────────┘     │    heatmap                │
-                                 │  • rolling_sharpe_chart   │
-                                 └───────────────────────────┘
+│    returns               │     │  • rolling_sharpe_chart   │
+└──────────────────────────┘     └───────────────────────────┘
 ```
 
 ### Data Flow
@@ -86,7 +84,7 @@ An earlier version also injected the current live market value as today's data p
 3. **Filter** — Stabilization detection trims the leading build-up period ([performance_view.py:35-47](src/dashboard/views/performance_view.py#L35-L47))
 4. **Benchmark** — Fetch S&P 500 and TA-125 from Yahoo Finance with SQLite caching ([benchmark_fetcher.py:15-47](src/market/benchmark_fetcher.py#L15-L47))
 5. **Compute** — Calculate Total Return, CAGR, Max Drawdown, Sharpe Ratio ([performance_metrics.py](src/dashboard/components/performance_metrics.py))
-6. **Render** — Six Plotly charts + metric cards via Streamlit
+6. **Render** — Up to eight Plotly charts + metric cards via Streamlit
 
 ### Stabilization Detection Algorithm
 
@@ -147,14 +145,17 @@ Benchmark prices are cached in `benchmark_cache` table ([db.py:153-159](src/data
 
 1. **4 Metric Cards** — Total Return, CAGR, Max Drawdown, Sharpe Ratio displayed in a row
 2. **Benchmark Captions** — Total Return and CAGR for each benchmark shown below the cards (colored labels)
-3. **Portfolio Value Chart** — Area chart with gradient fill showing portfolio value (₪) over time (420px)
+3. **Invested Capital Chart** — Area chart with gradient fill showing book value (₪) over time (420px)
 4. **Drawdown Chart** — Underwater/drawdown plot with red fill (250px)
-5. **Cumulative Returns Chart** — Base-100 normalized chart comparing portfolio (indigo solid) vs S&P 500 (amber dashed) and TA-125 (pink dashed) (450px)
-6. **Monthly Returns Bar + Rolling Sharpe** — Side-by-side: monthly returns bar chart (350px) and 60-day rolling Sharpe ratio with average line (300px)
-7. **Monthly Returns Heatmap** — Calendar-style year×month grid colored by return percentage
-8. **Auto Build-Up Detection** — Automatically skips initial import period (>10% daily swings)
-9. **Benchmark Caching** — SQLite cache for S&P 500 and TA-125 prices
-10. **Historical Data Only** — No forward-looking projections; charts end at the last stored daily state
+5. **Invested Capital vs Benchmarks** — Base-100 normalized chart comparing portfolio book value vs S&P 500 (amber dashed) and TA-125 (pink dashed) (450px)
+6. **Cumulative Returns vs Benchmarks** — Base-100 normalized chart using market value (mark-to-market) vs benchmarks (450px; shown only when sufficient price data exists)
+7. **Invested Capital — US vs TASE** — Base-100 split view comparing US portfolio (in ₪) vs TASE portfolio book value (450px; shown when both have ≥2 data points)
+8. **Cumulative Returns — US vs TASE** — Base-100 split view using market value for US vs TASE (450px; shown when both have ≥2 data points)
+9. **Monthly Returns Bar + Rolling Sharpe** — Side-by-side: monthly returns bar chart (350px) and 60-day rolling Sharpe ratio with average line (300px)
+10. **Disclaimer Caption** — Explains methodology difference: "Invested Capital" = cost basis + realized P&L; "Cumulative Returns" = actual market value including unrealized gains/losses
+11. **Auto Build-Up Detection** — Automatically skips initial import period (>10% daily swings)
+12. **Benchmark Caching** — SQLite cache for S&P 500 and TA-125 prices
+13. **Historical Data Only** — No forward-looking projections; charts end at the last stored daily state
 
 ### Supported Benchmarks
 
@@ -176,13 +177,15 @@ Benchmark prices are cached in `benchmark_cache` table ([db.py:153-159](src/data
 |--------|------|-------------|
 | 4 metric cards | `st.metric` | Key performance indicators |
 | Benchmark captions | `st.markdown` | Per-benchmark Total Return + CAGR (colored) |
-| Portfolio Value chart | `area_chart_with_gradient()` | Area chart with fill, value in ₪ (420px) |
+| Invested Capital chart | `area_chart_with_gradient()` | Area chart with fill, book value in ₪ (420px) |
 | Drawdown chart | `drawdown_chart()` | Underwater plot, red fill (250px) |
-| Cumulative Returns chart | Plotly `go.Scatter` | Base-100 multi-line comparison (450px) |
+| Invested Capital vs Benchmarks | Plotly `go.Scatter` | Base-100 book-value comparison (450px) |
+| Cumulative Returns vs Benchmarks | Plotly `go.Scatter` | Base-100 market-value comparison (450px) |
+| Invested Capital — US vs TASE | Plotly `go.Scatter` | Base-100 book-value split by market (450px) |
+| Cumulative Returns — US vs TASE | Plotly `go.Scatter` | Base-100 market-value split by market (450px) |
 | Monthly Returns bar | `monthly_returns_bar()` | Monthly returns, colored bars (350px) |
 | Rolling Sharpe chart | `rolling_sharpe_chart()` | 60-day window with avg line (300px) |
-| Monthly Returns heatmap | `monthly_returns_heatmap()` | Year×month calendar grid |
-| Disclaimer caption | `st.caption` | Notes methodology differences between Invested Capital and Cumulative Returns charts |
+| Disclaimer caption | `st.caption` | Notes methodology: Invested Capital = cost basis + realized P&L; Cumulative Returns = mark-to-market |
 
 ### Configuration
 
@@ -210,5 +213,4 @@ Benchmark prices are cached in `benchmark_cache` table ([db.py:153-159](src/data
 | Condition | Message |
 |-----------|---------|
 | No portfolio data | "No daily portfolio data yet. Import transactions first." |
-| No positive values | "Portfolio has no positive values to display." |
 | < 2 data points | "Not enough data points for performance analysis." |
