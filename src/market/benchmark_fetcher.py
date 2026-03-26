@@ -11,6 +11,42 @@ BENCHMARKS = {
     "TA-125": "^TA125.TA",
 }
 
+_FALLBACK_RISK_FREE = 0.04  # 4% annual fallback if fetch fails
+
+
+def get_risk_free_rate() -> float:
+    """Return the annualized risk-free rate (decimal, e.g. 0.0425 for 4.25%).
+
+    Uses the 13-week US Treasury bill rate (^IRX) from yfinance.
+    Caches the result in the metadata table for the current day.
+    Falls back to 4% if the fetch fails.
+    """
+    cached = repository.get_meta("risk_free_rate")
+    cached_date = repository.get_meta("risk_free_rate_date")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if cached and cached_date == today:
+        return float(cached)
+
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker("^IRX")
+        hist = ticker.history(period="5d")
+        if not hist.empty:
+            # ^IRX returns the annualized rate as a percentage (e.g. 4.25)
+            rate_pct = float(hist["Close"].iloc[-1])
+            rate = rate_pct / 100
+            repository.set_meta("risk_free_rate", str(rate))
+            repository.set_meta("risk_free_rate_date", today)
+            logger.info("Risk-free rate updated: %.2f%% (3-month T-bill)", rate_pct)
+            return rate
+    except Exception as exc:
+        logger.warning("Failed to fetch risk-free rate (^IRX): %s", exc)
+
+    if cached:
+        return float(cached)
+    return _FALLBACK_RISK_FREE
+
 
 def fetch_benchmark(name: str, start_date: str, end_date: str) -> dict[str, float]:
     """Fetch daily closes for a benchmark index.

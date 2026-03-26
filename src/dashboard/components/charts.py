@@ -7,6 +7,7 @@ from typing import Optional
 
 from src.database import repository
 from src.dashboard import theme
+from src.market.benchmark_fetcher import get_risk_free_rate
 
 
 def _display_label(sym: str, pos) -> str:
@@ -270,7 +271,7 @@ def rolling_sharpe_chart(series: pd.Series, window: int = 60) -> Optional[go.Fig
     if len(returns) < window:
         return None
 
-    daily_rf = 0.04 / 252
+    daily_rf = get_risk_free_rate() / 252
     excess = returns - daily_rf
     rolling_mean = excess.rolling(window).mean()
     rolling_std = excess.rolling(window).std()

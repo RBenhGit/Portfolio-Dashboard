@@ -1,6 +1,6 @@
 # IBI Portfolio Dashboard
 
-A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 6 interactive tabs with 9 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
+A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 6 interactive tabs with 8 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
 
 ---
 
@@ -31,11 +31,13 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | **Agorot pricing** — TASE prices in 1/100 shekel | Convert all TASE prices ÷100 at ingestion boundary | Detection logic required for API prices; one-time conversion at boundaries |
 | **21 Hebrew transaction types** | Broker-agnostic classifier interface (`BaseClassifier` ABC) with IBI-specific implementation | Allows future broker integrations without touching builder/dashboard |
 | **Phantom entries** — tax accounts (999*), forex (99028), settlement (5039813) | Mark `is_phantom=1` in DB, filter at query time | Preserves audit trail; allows re-examination if detection logic is wrong |
-| **Option expiry reordering** — IBI records sell before credit | Reorder sort keys to process credits before sells | Transparent to downstream; sort key is string-based |
+| **Option expiry reordering** — IBI records sell before credit | Reorder sort keys to process credits first (`date_0` for adds, `date_1` for removes) | Transparent to downstream; sort key is string-based |
 | **Pre-transfer missing shares** — sells exceed available qty | Auto-fill shortfall at cost basis ₪0 | Early positions have artificially depressed cost basis |
 | **Stock splits (הטבה)** — ambiguous: split if price=0, bonus if price>0 | Inspect execution price to classify | Heuristic; breaks if IBI records split with non-zero price |
 | **Historical FX rates** — reference date is last transaction date | Store per-date rates; no live FX for valuations | Reproducible valuations tied to data; no daily fluctuation surprises |
 | **Same-date ordering** — buys and sells on same date | Process "add" before "remove" via sort key priority | Prevents false insufficient-shares errors |
+| **Two valuation methods** — book value vs market value | "Invested Capital" charts use book value (cost basis + realized P&L); "Cumulative Returns" charts and performance metrics use mark-to-market | Clear separation: "How much did I deploy?" vs "How did it perform?" |
+| **No forward-looking data** — charts end at last stored daily state | Historical series only; no live market value injection | Philosophically clean; avoids mixing methodologies |
 
 ---
 
@@ -45,12 +47,12 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 | Tab | Name | Layout | Key Content |
 |-----|------|--------|-------------|
-| 1 | **Statistics** | Two-column (1/3 stats, 2/3 charts) | Portfolio summary (6 metric cards), performance metrics table (vs benchmarks), top 5 gainers/losers, currency exposure, treemap composition, P&L breakdown bar |
-| 2 | **Performance** | Full-width, up to 8 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; invested capital area, drawdown, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), US vs TASE splits, monthly returns bar, rolling Sharpe |
+| 1 | **Statistics** | Two-column (1/3 stats, 2/3 charts) | Portfolio summary (6 metric cards + 3 position counts), performance metrics table (vs benchmarks), top 5 gainers/losers, currency exposure, treemap composition, P&L breakdown bar |
+| 2 | **Performance** | Full-width, up to 8 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; invested capital area, drawdown, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), US vs TASE splits (invested capital + cumulative returns), monthly returns bar, rolling Sharpe |
 | 3 | **TASE (₪)** | Full-width | NIS positions with cash card, donut pie allocation, P&L bar chart, styled position table |
 | 4 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
 | 5 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
-| 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for interactive table |
+| 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for open-only filter + interactive table |
 
 ### Charts (8 Plotly Functions)
 
@@ -72,7 +74,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | Total Return | `(end / start - 1) × 100` | Market value (mark-to-market); falls back to book value if prices unavailable |
 | CAGR | `(end / start)^(1/years) - 1` | Uses 365.25 days/year |
 | Max Drawdown | `min((series - cummax) / cummax)` | Peak-to-trough decline % |
-| Sharpe Ratio | `mean(excess) / std(excess) × √252` | 4% risk-free rate, min 30 data points |
+| Sharpe Ratio | `mean(excess) / std(excess) × √252` | Risk-free rate = 3-month US T-bill (`^IRX`, cached daily via yfinance; falls back to 4%), min 30 data points |
 
 ### Supported Transaction Types (21)
 
@@ -86,6 +88,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | **Dividends** | דיבידנד, הפקדה דיבידנד מטח | Cash inflow (NIS or USD) |
 | **Fees/Tax** | דמי טפול, משיכת מס חול מטח, משיכת מס מטח, משיכת ריבית מטח | Cash outflow (phantom) |
 | **Other** | ריבית מזומן בשח (interest), העברה מזומן בשח (transfer) | Cash movements |
+| **Forex** | B USD/ILS (symbol 99028) | NIS→USD conversion (phantom) |
 
 ### Sidebar Controls
 
@@ -100,7 +103,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 - Performance metrics use **market value** (mark-to-market) when price data is available, falling back to cost basis + realized P&L when insufficient prices are cached
 - Performance charts end at the **last transaction date**, not today's date
-- Sharpe Ratio uses a **hardcoded 4% risk-free rate** and requires ≥30 data points
+- Sharpe Ratio uses the **3-month US Treasury bill rate** (`^IRX` via yfinance, cached daily; falls back to 4% if unavailable) and requires ≥30 data points
 - Only **2 benchmarks** supported (S&P 500, TA-125); adding more requires editing `BENCHMARKS` dict
 - FX conversion uses the rate from the portfolio state snapshot, not live rates
 - Options are not priced (no market price fetching for options)
@@ -121,7 +124,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 ├──────────────────────────────────────────────────────────────┤
 │  Portfolio Engine                                            │
 │  builder.py (sequential build + fast-load cache)             │
-│  + price_fetcher.py                                          │
+│  + ingestion.py (pipeline orchestration)                     │
 ├──────────────────────────────────────────────────────────────┤
 │  Classification & Enrichment                                 │
 │  ibi_classifier.py (21 types) + symbol_mapper.py             │
@@ -153,21 +156,23 @@ FX Fetcher ────── Fetch historical USD/ILS rates for all transaction
     │               Primary: Twelvedata API │ Fallback: yfinance
     ▼
 Repository ────── Deduplicated insert (INSERT OR IGNORE by row_hash)
-    │
+    │               Backfill fx_rate_on_date + cost_basis_nis per transaction
     ▼
 Portfolio Builder ── Sequential pass over all transactions:
     │                  • Reorder option expiry (fix IBI ordering bug)
     │                  • Process buys/sells/splits/deposits chronologically
     │                  • Track NIS and USD positions separately
     │                  • Record daily portfolio state snapshots
+    │                  • Fetch closing prices for market value calculation
     │                  • Calculate realized P&L on each sell
+    │                  • Cache result in portfolio_current (JSON)
     ▼
 Price Fetcher ──── Fetch closing prices for open positions
     │                Primary: Twelvedata │ Fallback: yfinance
     ▼
 Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
     Tab 1: Statistics — portfolio summary, performance, top gainers/losers
-    Tab 2: Performance — historical returns vs benchmarks (6 charts)
+    Tab 2: Performance — historical returns vs benchmarks (up to 8 charts)
     Tab 3: TASE (₪) — NIS positions
     Tab 4: US ($) — USD positions
     Tab 5: Merged (₪) — all positions in shekels
@@ -176,21 +181,23 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 ### Key Algorithms
 
-**Sequential Portfolio Build** ([builder.py](src/portfolio/builder.py)) — Processes every transaction chronologically in a single pass, maintaining position maps (`positions_nis`, `positions_usd`), cash balances, and cumulative realized P&L. Each sell calculates `realized_pnl = qty × (sale_price - avg_cost)` and proportionally reduces cost basis. NIS cash uses IBI's own running balance column; USD cash is accumulated from cash flow transactions.
+**Sequential Portfolio Build** ([builder.py](src/portfolio/builder.py)) — Processes every transaction chronologically in a single pass, maintaining position maps (`positions_nis`, `positions_usd`), cash balances, and cumulative realized P&L. Each sell calculates `realized_pnl = qty × (sale_price - avg_cost)` and proportionally reduces cost basis. NIS cash uses IBI's own running balance column; USD cash is accumulated from cash flow transactions. At each date boundary, a `daily_portfolio_state` row is written with both book value and market value.
 
 **Stock Split Handling** — IBI records splits as the number of NEW shares added (הטבה with price=0). The builder computes `new_quantity = current + added`, keeping `total_invested` unchanged so average cost adjusts automatically: `ratio = (pos.quantity + qty_abs) / pos.quantity`.
 
-**Option Expiry Reordering** ([builder.py:21-51](src/portfolio/builder.py#L21-L51)) — IBI records expiry credits (הפקדה פקיעה) after sells on the same date. The builder adjusts sort keys to process credits first (`date_0` for adds, `date_1` for removes), preventing false insufficient-shares errors.
+**Option Expiry Reordering** ([builder.py](src/portfolio/builder.py)) — IBI records expiry credits (הפקדה פקיעה) after sells on the same date. The builder adjusts sort keys to process credits first (`date_0` for adds, `date_1` for removes), preventing false insufficient-shares errors. Options can have negative quantity (short positions), unlike stocks.
 
-**Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later.
+**Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later. 14 symbols are affected with small shortfalls.
 
-**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (12 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (14 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
 
-**Stabilization Detection** ([performance_view.py:46-56](src/dashboard/views/performance_view.py#L46-L56)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there.
+**Stabilization Detection** ([performance_view.py](src/dashboard/views/performance_view.py)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there. Fallback: if no stable day found, keep all data.
 
 **Fast-Load Cache** ([repository.py](src/database/repository.py), [builder.py](src/portfolio/builder.py)) — After each full build, the result (positions, cash, P&L) is serialized to JSON and stored in the `portfolio_current` table. On app startup, `is_portfolio_stale()` compares `built_at` against the latest `import_log` entry. If no new imports occurred, the cached result is returned instantly, skipping the full sequential rebuild. Position objects are serialized via `to_snapshot_dict()` and reconstructed via `Position.from_dict()`.
 
 **Benchmark Caching** ([benchmark_fetcher.py](src/market/benchmark_fetcher.py)) — S&P 500 and TA-125 prices cached in SQLite `benchmark_cache` table. Fetcher checks cached date ranges and only requests missing periods from yfinance, minimizing API calls. Failures degrade gracefully (logged as warnings).
+
+**Risk-Free Rate** ([benchmark_fetcher.py](src/market/benchmark_fetcher.py)) — `get_risk_free_rate()` fetches the 13-week US Treasury bill rate (`^IRX`) via yfinance, caches the result in the `metadata` table for the current day, and falls back to 4% annual if the fetch fails. Used by both the Sharpe Ratio metric and the rolling Sharpe chart.
 
 ### Database Schema (SQLite, 12 tables)
 
@@ -199,8 +206,8 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 | `transactions` | Classified transaction ledger (26 columns, deduped by `row_hash`) |
 | `fx_rates` | Historical USD/ILS rates by date |
 | `price_cache` | Market prices by (symbol, market, price_date) |
-| `metadata` | App-wide key-value store (file mtime, last parse, etc.) |
-| `daily_portfolio_state` | End-of-day portfolio snapshot (invested, cash, P&L, market values) |
+| `metadata` | App-wide key-value store (file mtime, last parse, risk-free rate, etc.) |
+| `daily_portfolio_state` | End-of-day portfolio snapshot (invested, cash, P&L, market values per market) |
 | `realized_trades` | Per-sell trade details with P&L |
 | `portfolio_snapshots` | Point-in-time portfolio summaries |
 | `position_snapshots` | Holdings within each snapshot |
@@ -218,7 +225,8 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 | Excel I/O | openpyxl >=3.1.2 |
 | Charts | Plotly >=5.18.0 |
 | Database | SQLite3 (WAL mode, built-in) |
-| Price Data | Twelvedata (primary) + yfinance >=0.2.66 (fallback) |
+| Price Data (primary) | Twelvedata (paid account) |
+| Price Data (fallback) | yfinance >=0.2.66 |
 | HTTP | requests >=2.31.0 |
 | Config | python-dotenv >=1.0.0 |
 
@@ -295,10 +303,11 @@ Portfolio_Dashboard/
 ├── requirements.txt                # Python dependencies
 ├── .env                            # API keys (not in repo)
 ├── docs/                           # Project documentation
+│   ├── MASTER_PLAN.md              # Architecture & implementation plan
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
-├── tests/                          # Test suite (91 tests)
+├── tests/                          # Test suite (88 tests)
 │   ├── test_builder.py             # Portfolio build logic tests
 │   ├── test_classifier.py          # Transaction classification tests
 │   ├── test_performance_metrics.py # Metric calculation tests
@@ -311,20 +320,20 @@ Portfolio_Dashboard/
     ├── config.py                   # Paths, API keys, constants
     ├── models/
     │   ├── transaction.py          # Transaction dataclass
-    │   └── position.py             # Position dataclass
+    │   └── position.py             # Position dataclass (with to_dict/from_dict)
     ├── input/
     │   └── excel_reader.py         # IBI Excel parsing & normalization
     ├── classifiers/
     │   ├── base_classifier.py      # Abstract classifier interface
     │   └── ibi_classifier.py       # 21 IBI transaction type classifier
     ├── market/
-    │   ├── symbol_mapper.py        # TASE ID → ticker resolution
-    │   ├── price_fetcher.py        # Market price fetching & caching
+    │   ├── symbol_mapper.py        # TASE ID → ticker resolution + Hebrew abbrev expansion
+    │   ├── price_fetcher.py        # Market price fetching (Twelvedata + yfinance fallback)
     │   ├── fx_fetcher.py           # USD/ILS historical rate fetching
-    │   └── benchmark_fetcher.py    # S&P 500 & TA-125 via yfinance + cache
+    │   └── benchmark_fetcher.py    # S&P 500 & TA-125 via yfinance + cache + risk-free rate
     ├── portfolio/
     │   ├── ingestion.py            # Full pipeline orchestration
-    │   └── builder.py              # Sequential portfolio build loop
+    │   └── builder.py              # Sequential portfolio build loop + fast-load cache
     ├── database/
     │   ├── db.py                   # SQLite schema (12 tables, WAL mode)
     │   └── repository.py           # Data access layer (CRUD)
@@ -332,7 +341,8 @@ Portfolio_Dashboard/
         ├── theme.py                # Color palette, Plotly template (ibi_dark)
         ├── styles.py               # CSS stylesheet + HTML helpers (metric_card_html, html_table)
         ├── components/
-        │   ├── charts.py           # 9 Plotly chart functions (pie, bar, treemap, waterfall, area, drawdown, heatmap, monthly bar, rolling Sharpe)
+        │   ├── charts.py           # 8 Plotly chart functions (pie, bar, treemap, waterfall,
+        │   │                       #   area, drawdown, monthly bar, rolling Sharpe)
         │   ├── position_table.py   # Styled HTML position table
         │   └── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
         └── views/

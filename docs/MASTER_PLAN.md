@@ -584,7 +584,7 @@ Rendered via `performance_view.render()` (no parameters). Key design decisions:
 - **Stabilization detection** — automatically skips initial account build-up period (>10% daily swings from bulk imports)
 - **Benchmarks** — S&P 500 (`^GSPC`) and TA-125 (`^TA125.TA`) fetched via yfinance with permanent SQLite cache (`benchmark_cache` table)
 - **Valuation method** — performance metrics (Total Return, CAGR, Sharpe, Drawdown) use **market value** (mark-to-market) when available, falling back to book value (cost basis + realized P&L); "Invested Capital" charts use book value
-- **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 4% risk-free rate, 252 trading days, min 30 data points
+- **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 3-month US T-bill rate (`^IRX`, cached daily via yfinance; falls back to 4%), 252 trading days, min 30 data points
 
 ### Tab 3: TASE (₪) — full-width NIS positions
 

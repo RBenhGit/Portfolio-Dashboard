@@ -107,7 +107,7 @@ if stable_mask.any():
 | Total Return | `(end / start - 1) × 100` | [performance_view.py:65](src/dashboard/views/performance_view.py#L65) |
 | CAGR | `(end / start)^(1/years) - 1` using 365.25 days/year | [performance_metrics.py:13-28](src/dashboard/components/performance_metrics.py#L13-L28) |
 | Max Drawdown | `min((series - cummax) / cummax)` | [performance_metrics.py:31-37](src/dashboard/components/performance_metrics.py#L31-L37) |
-| Sharpe Ratio | `mean(excess) / std(excess) × √252`, risk-free = 4%, min 30 points | [performance_metrics.py:40-57](src/dashboard/components/performance_metrics.py#L40-L57) |
+| Sharpe Ratio | `mean(excess) / std(excess) × √252`, risk-free = 3-month T-bill (`^IRX`, cached daily; fallback 4%), min 30 points | [performance_metrics.py:42-64](src/dashboard/components/performance_metrics.py#L42-L64) |
 
 ### Benchmark Caching
 

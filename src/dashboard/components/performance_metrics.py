@@ -2,6 +2,8 @@
 import numpy as np
 import pandas as pd
 
+from src.market.benchmark_fetcher import get_risk_free_rate
+
 
 def compute_cumulative_returns(series: pd.Series) -> pd.Series:
     """Normalize a price series to base 100."""
@@ -37,13 +39,18 @@ def compute_max_drawdown(series: pd.Series) -> float:
     return float(drawdown.min()) * 100
 
 
-def compute_sharpe_ratio(series: pd.Series, risk_free_annual: float = 0.04) -> float:
+def compute_sharpe_ratio(series: pd.Series, risk_free_annual: float | None = None) -> float:
     """Annualized Sharpe ratio using 252 trading days.
 
     Requires at least 30 data points. Forward-fills sparse dates before computing.
+    If risk_free_annual is None, the 3-month US Treasury bill rate is fetched
+    automatically (cached daily via yfinance ^IRX, falls back to 4%).
     """
     if len(series) < 30:
         return 0.0
+
+    if risk_free_annual is None:
+        risk_free_annual = get_risk_free_rate()
 
     # Forward-fill sparse dates
     daily = series.resample("D").ffill()
