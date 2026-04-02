@@ -97,11 +97,12 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md # Performance tab deep-dive
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf          # IBI API reference
-├── tests/                              # Test suite (91 tests)
+├── tests/                              # Test suite (104 tests)
 │   ├── test_builder.py                 # Portfolio build logic
 │   ├── test_classifier.py              # Transaction classification
 │   ├── test_performance_metrics.py     # Metric calculations
-│   └── test_repository.py             # Database CRUD
+│   ├── test_repository.py             # Database CRUD
+│   └── test_symbol_mapper.py           # Option detection + expiry parsing
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx           # Source (read-only)
 ├── data/
@@ -382,7 +383,7 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 ### Pre-processing (before sequential pass)
 
 1. **Sort** all transactions by date ASC (IBI exports date-DESC)
-2. **Options expiry reordering:** IBI records the sell *before* the deposit for options expiry (הפקדה פקיעה). This causes an "insufficient shares" error. Fix: for options symbols (8-digit codes starting with 8 or 9), move any הפקדה פקיעה deposit to one day before the earliest sell of that symbol.
+2. **Options expiry reordering:** IBI records the sell *before* the deposit for options expiry (הפקדה פקיעה). The builder assigns sort-key tiers within each date: `_10` regular adds, `_11` regular removes, `_12` expiry credits (הפקדה פקיעה). This ensures the short position exists when the credit arrives to close it, and correctly triggers the orphan-skip guard for credits with no prior short.
 3. **Filter phantoms:** mark `is_phantom=1` in DB; exclude from position building.
 4. **Fetch FX rates:** for every unique date in the transaction set, ensure `fx_rates` table has a rate. Bulk-fetch missing dates from Twelvedata before the pass begins.
 
@@ -649,19 +650,20 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│  Open Options Positions                                                   │
+│  Options Positions                                                        │
 │                                                                           │
-│  NIS Options table (if any):                                             │
-│  Symbol | Name | Qty | Avg Cost (₪) | Invested (₪)                      │
+│  [Toggle: Open positions only]  [Toggle: Interactive table]              │
 │                                                                           │
-│  USD Options table (if any):                                             │
-│  Symbol | Name | Qty | Avg Cost ($) | Invested ($)                       │
+│  Total Positions: N    Long / Short: X / Y    Total Capital: Z           │
+│                                                                           │
+│  Symbol | Name | Currency | Direction | Quantity | Avg Cost | Total Inv. │
+│  (merged NIS + USD table with direction badges: LONG/SHORT/CLOSED)       │
 │                                                                           │
 │  st.info if no options positions found                                   │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Rendered via `options_view.render(options_nis, options_usd)`. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
+Rendered via `options_view.render(options_nis, options_usd)`. NIS and USD options are merged into a single table with a Currency column. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
 
 
 ### Sidebar
@@ -806,9 +808,9 @@ yfinance>=0.2.66
 11. ✅ **Price fetcher** — `src/market/price_fetcher.py` (Twelvedata + yfinance + TASE agorot verification)
 12. ✅ **Snapshot writer** — `repository.save_snapshot()` (called after each import/refresh)
 13. ✅ **Components** — `position_table.py` (with cash row), `charts.py`, `performance_metrics.py`
-14. ✅ **Views** — `portfolio_view.py` (Tab 2: TASE, Tab 3: US), `merged_view.py` (Tab 4)
-15. ✅ **Options tab** — `options_view.py` (Tab 5: open options positions)
-16. ✅ **Performance tab** — `performance_view.py` (Tab 6: historical returns + benchmarks), `benchmark_fetcher.py`
+14. ✅ **Views** — `portfolio_view.py` (Tab 3: TASE, Tab 4: US), `merged_view.py` (Tab 5)
+15. ✅ **Options tab** — `options_view.py` (Tab 6: open options positions)
+16. ✅ **Performance tab** — `performance_view.py` (Tab 2: historical returns + benchmarks), `benchmark_fetcher.py`
 17. ✅ **App entry point** — `app.py` (6 tabs + sidebar uploader)
 18. ✅ **Statistics tab** — `statistics_view.py` (Tab 1: portfolio summary, performance metrics, trading activity, risk & diversification)
 19. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
@@ -867,7 +869,7 @@ streamlit run app.py
 [x] Donut pie chart + P&L bar chart colored by market
 
 # Tab 6 — Options
-[x] NIS and USD options positions displayed separately
+[x] NIS and USD options merged into single table with Currency column
 [x] Direction badges (LONG/SHORT/CLOSED)
 [x] Toggle: open positions only
 [x] Interactive table toggle

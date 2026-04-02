@@ -199,6 +199,60 @@ class TestOrphanOptionExpiry:
             assert result["options_nis"]["80001234"].quantity == pytest.approx(0.0)
 
 
+class TestOptionShortExpiry:
+    """Test that expired short options are closed (quantity = 0)."""
+
+    @patch("src.portfolio.builder.repository")
+    def test_same_date_short_sell_and_expiry(self, mock_repo):
+        """Short sell and expiry credit on same date → position closed to 0."""
+        txns = [
+            _tx(date="2024-01-15", effect="sell", direction="remove",
+                qty=100, exec_price=5, cost_basis=0, cost_basis_nis=0,
+                symbol="80001234", name="אופציה",
+                transaction_type="מכירה מעוף"),
+            _tx(date="2024-01-15", effect="option_expiry", direction="add",
+                qty=100, exec_price=0, cost_basis=0, cost_basis_nis=0,
+                symbol="80001234", name="אופציה",
+                transaction_type="הפקדה פקיעה"),
+        ]
+        mock_repo.get_all_transactions.return_value = txns
+        mock_repo.get_fx_rate.return_value = 3.7
+        mock_repo.clear_daily_portfolio_state.return_value = None
+        mock_repo.clear_realized_trades.return_value = None
+        mock_repo.upsert_daily_state.return_value = None
+
+        from src.portfolio.builder import build
+        result = build()
+
+        assert "80001234" in result["options_nis"]
+        assert result["options_nis"]["80001234"].quantity == pytest.approx(0.0)
+
+    @patch("src.portfolio.builder.repository")
+    def test_different_date_short_sell_then_expiry(self, mock_repo):
+        """Short sell on one date, expiry credit on a later date → closed to 0."""
+        txns = [
+            _tx(date="2024-01-15", effect="sell", direction="remove",
+                qty=100, exec_price=5, cost_basis=0, cost_basis_nis=0,
+                symbol="80001234", name="אופציה",
+                transaction_type="מכירה מעוף"),
+            _tx(date="2024-03-20", effect="option_expiry", direction="add",
+                qty=100, exec_price=0, cost_basis=0, cost_basis_nis=0,
+                symbol="80001234", name="אופציה",
+                transaction_type="הפקדה פקיעה"),
+        ]
+        mock_repo.get_all_transactions.return_value = txns
+        mock_repo.get_fx_rate.return_value = 3.7
+        mock_repo.clear_daily_portfolio_state.return_value = None
+        mock_repo.clear_realized_trades.return_value = None
+        mock_repo.upsert_daily_state.return_value = None
+
+        from src.portfolio.builder import build
+        result = build()
+
+        assert "80001234" in result["options_nis"]
+        assert result["options_nis"]["80001234"].quantity == pytest.approx(0.0)
+
+
 class TestUsdPositions:
     """Test USD position handling."""
 

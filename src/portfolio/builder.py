@@ -20,34 +20,21 @@ _EPS = 0.001   # minimum quantity threshold
 
 
 def _reorder_options_expiry(transactions: list) -> list:
-    """Fix IBI ordering bug: הפקדה פקיעה (expiry credit) is recorded AFTER
-    the sell (מכירה מעוף) of the same option. This causes an 'insufficient shares'
-    error during the sequential pass.
+    """Ensure option expiry credits (הפקדה פקיעה) are processed AFTER all
+    removes on the same date, so that the short position already exists when
+    the credit arrives to close it.
 
-    Fix: for 8-digit option symbols (starting 8x/9x), move any הפקדה פקיעה
-    deposit to one day *before* the earliest sell of that symbol.
-    We do this by adjusting the sort key only — not the stored date.
+    Sort key tiers within a date:
+      _10  regular adds   (buys, deposits)
+      _11  regular removes  (sells, withdrawals)
+      _12  option expiry credits  (הפקדה פקיעה)
     """
-    # Build map: option_symbol → earliest sell date
-    sell_dates: dict[str, str] = {}
-    for tx in transactions:
-        sym = str(tx["security_symbol"] or "")
-        if (tx["effect"] in ("sell", "option_expiry") and
-                tx["share_direction"] == "remove" and
-                len(sym) == 8 and sym[:1] in ("8", "9")):
-            if sym not in sell_dates or tx["date"] < sell_dates[sym]:
-                sell_dates[sym] = tx["date"]
-
     def sort_key(tx):
-        sym = str(tx["security_symbol"] or "")
-        if (tx["transaction_type"] == "הפקדה פקיעה" and
-                sym in sell_dates):
-            # Sort just before the sell date
-            d = sell_dates[sym]
-            return d + "_0"   # sorts before same date + "_1"
-        # Within the same date, process adds before removes
+        date = tx["date"]
+        if tx["transaction_type"] == "הפקדה פקיעה":
+            return date + "_12"
         dir_priority = "0" if tx.get("share_direction") == "add" else "1"
-        return tx["date"] + "_1" + dir_priority
+        return date + "_1" + dir_priority
 
     return sorted(transactions, key=sort_key)
 

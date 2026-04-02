@@ -31,7 +31,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | **Agorot pricing** — TASE prices in 1/100 shekel | Convert all TASE prices ÷100 at ingestion boundary | Detection logic required for API prices; one-time conversion at boundaries |
 | **21 Hebrew transaction types** | Broker-agnostic classifier interface (`BaseClassifier` ABC) with IBI-specific implementation | Allows future broker integrations without touching builder/dashboard |
 | **Phantom entries** — tax accounts (999*), forex (99028), settlement (5039813) | Mark `is_phantom=1` in DB, filter at query time | Preserves audit trail; allows re-examination if detection logic is wrong |
-| **Option expiry reordering** — IBI records sell before credit | Reorder sort keys to process credits first (`date_0` for adds, `date_1` for removes) | Transparent to downstream; sort key is string-based |
+| **Option expiry reordering** — IBI records sell before credit | Expiry credits (`הפקדה פקיעה`) sorted after all removes (`_12` tier) so the short position exists when the credit arrives to close it | Transparent to downstream; sort key is string-based |
 | **Pre-transfer missing shares** — sells exceed available qty | Auto-fill shortfall at cost basis ₪0 | Early positions have artificially depressed cost basis |
 | **Stock splits (הטבה)** — ambiguous: split if price=0, bonus if price>0 | Inspect execution price to classify | Heuristic; breaks if IBI records split with non-zero price |
 | **Historical FX rates** — reference date is last transaction date | Store per-date rates; no live FX for valuations | Reproducible valuations tied to data; no daily fluctuation surprises |
@@ -185,7 +185,9 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 **Stock Split Handling** — IBI records splits as the number of NEW shares added (הטבה with price=0). The builder computes `new_quantity = current + added`, keeping `total_invested` unchanged so average cost adjusts automatically: `ratio = (pos.quantity + qty_abs) / pos.quantity`.
 
-**Option Expiry Reordering** ([builder.py](src/portfolio/builder.py)) — IBI records expiry credits (הפקדה פקיעה) after sells on the same date. The builder adjusts sort keys to process credits first (`date_0` for adds, `date_1` for removes), preventing false insufficient-shares errors. Options can have negative quantity (short positions), unlike stocks.
+**Option Expiry Reordering** ([builder.py](src/portfolio/builder.py)) — IBI records expiry credits (הפקדה פקיעה) after sells on the same date. The builder assigns sort keys in three tiers within a date: `_10` (regular adds), `_11` (regular removes), `_12` (expiry credits). This guarantees the short position exists when the credit arrives to close it, and correctly skips credits with no prior short (orphan expiry). Options can have negative quantity (short positions), unlike stocks.
+
+**Past-Expiry LONG Detection** ([symbol_mapper.py](src/market/symbol_mapper.py), [options_view.py](src/dashboard/views/options_view.py)) — When IBI omits the closing `משיכה פקיעה` for a long option, the builder cannot close the position. `parse_option_expiry()` extracts the expiry date from the option name (e.g. `תP001560M407-35` → July 2024) using the embedded `M[Y][MM]` token. The Options tab uses this at render time to override past-expiry LONG positions to CLOSED.
 
 **Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later. 14 symbols are affected with small shortfalls.
 
@@ -307,11 +309,12 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
-├── tests/                          # Test suite (88 tests)
+├── tests/                          # Test suite (104 tests)
 │   ├── test_builder.py             # Portfolio build logic tests
 │   ├── test_classifier.py          # Transaction classification tests
 │   ├── test_performance_metrics.py # Metric calculation tests
-│   └── test_repository.py          # Database CRUD tests
+│   ├── test_repository.py          # Database CRUD tests
+│   └── test_symbol_mapper.py       # Option detection + expiry parsing tests
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx       # IBI broker export
 ├── data/

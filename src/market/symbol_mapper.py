@@ -4,8 +4,10 @@ TASE stocks on IBI use numeric IDs (e.g. 445015 for Matrix IT).
 Twelvedata and yfinance use alphabetic tickers (MTRX, MTRX.TA).
 This module resolves IBI IDs → API-compatible ticker symbols.
 """
+import calendar as _calendar
 import logging
 import re
+from datetime import date
 from typing import Optional
 
 import requests
@@ -18,6 +20,7 @@ _US_TICKER_RE   = re.compile(r'^[A-Z]{1,6}$')
 _TASE_NUM_RE    = re.compile(r'^\d{5,8}$')
 _OPTION_RE      = re.compile(r'^[89]\d{7}$')
 _OPTION_NAME_RE = re.compile(r'^ת[A-Z]\d+M\d+-\d+$')  # e.g. תP001440M212-35
+_EXPIRY_RE      = re.compile(r'M(\d)(\d{2})')           # e.g. M407 → year=4, month=07
 
 # Known IBI numeric ID → Twelvedata ticker (static fallback)
 _KNOWN_TASE_MAP: dict[str, dict] = {
@@ -59,6 +62,26 @@ def is_option(security_symbol: str, security_name: Optional[str] = None) -> bool
     sym  = str(security_symbol or "").strip()
     name = str(security_name or "").strip()
     return bool(_OPTION_RE.match(sym) or _OPTION_NAME_RE.match(name))
+
+
+def parse_option_expiry(security_name: Optional[str]) -> Optional[date]:
+    """Extract expiry date from a TASE option name (e.g. תP001560M407-35).
+
+    Naming convention: M[Y][MM] where Y is the last digit of the year in the
+    2020s decade (2=2022, 3=2023, 4=2024, 5=2025 …) and MM is the 2-digit
+    expiry month.  Returns the last calendar day of that month, or None if the
+    name does not contain a recognisable expiry token.
+    """
+    m = _EXPIRY_RE.search(security_name or "")
+    if not m:
+        return None
+    try:
+        year  = 2020 + int(m.group(1))
+        month = int(m.group(2))
+        last_day = _calendar.monthrange(year, month)[1]
+        return date(year, month, last_day)
+    except (ValueError, OverflowError):
+        return None
 
 
 def resolve_tase_symbol(ibi_id: str, security_name: Optional[str] = None) -> dict | None:

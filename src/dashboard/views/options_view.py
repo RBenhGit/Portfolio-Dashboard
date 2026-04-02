@@ -1,9 +1,12 @@
 """Options positions tab renderer."""
+from datetime import date as _date
+
 import pandas as pd
 import streamlit as st
 
 from src.dashboard import theme
 from src.dashboard.styles import section_header, html_table
+from src.market.symbol_mapper import parse_option_expiry
 from src.models.position import Position
 
 _QTY_EPS = 0.001
@@ -49,6 +52,10 @@ def render(options_nis: dict, options_usd: dict) -> None:
         elif pos.quantity > 0:
             direction = "LONG"
             avg_cost = pos.average_cost
+            # Treat past-expiry long as closed (missing משיכה פקיעה in IBI data)
+            expiry = parse_option_expiry(pos.security_name)
+            if expiry and expiry < _date.today():
+                direction = "CLOSED"
         else:
             direction = "SHORT"
             avg_cost = abs(pos.total_invested) / qty_abs if qty_abs else 0.0
@@ -73,7 +80,7 @@ def render(options_nis: dict, options_usd: dict) -> None:
             color = colors.get(val, theme.OPT_CLOSED)
             return f"color: {color}; font-weight: bold"
 
-        styled = df.style.applymap(_color_direction, subset=["Direction"])
+        styled = df.style.map(_color_direction, subset=["Direction"])
         styled = styled.format({
             "Quantity": "{:,.0f}",
             "Avg Cost": "{:,.2f}",

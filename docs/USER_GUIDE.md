@@ -357,6 +357,10 @@ Detects options/warrants to skip from pricing:
 - Symbol matches `[89]\d{7}` (8-digit starting with 8 or 9)
 - Name matches Hebrew option pattern `^ת[A-Z]\d+M\d+-\d+$`
 
+##### `parse_option_expiry(security_name) -> date | None`
+
+Extracts the expiry date from a TASE option name using the embedded `M[Y][MM]` token (e.g. `תP001560M407-35` → `date(2024, 7, 31)`). `Y` is the last digit of the year in the 2020s decade; `MM` is the two-digit month. Returns the last calendar day of that month, or `None` if the name does not contain a recognisable token. Used by `options_view.py` to override past-expiry LONG positions to CLOSED at render time when IBI omitted the closing `משיכה פקיעה`.
+
 ##### `detect_market(security_symbol, currency) -> str`
 
 Determines TASE vs US market (same logic as classifier).
@@ -535,7 +539,7 @@ The core engine that processes all transactions and builds portfolio state.
 
 ##### `_reorder_options_expiry(transactions) -> list`
 
-Fixes an IBI bug where option expiry credits appear *after* the sell on the same date. Adjusts sort keys so credits process first.
+Sorts all transactions so that within each date, expiry credits (הפקדה פקיעה) are processed *after* all removes. Sort-key tiers: `_10` regular adds, `_11` regular removes, `_12` expiry credits. This ensures a short position exists when its closing credit arrives, and correctly triggers the orphan-skip guard for credits with no prior short.
 
 #### Ingestion Pipeline (`ingestion.py`)
 
@@ -850,9 +854,9 @@ All positions unified in NIS. USD positions converted via FX rate.
 Options positions with direction classification.
 
 **Direction Logic:**
-- **LONG**: quantity > 0.001
+- **LONG**: quantity > 0.001 *and* expiry date is today or in the future (or not parseable)
 - **SHORT**: quantity < −0.001
-- **CLOSED**: |quantity| < 0.001
+- **CLOSED**: |quantity| < 0.001, *or* LONG with a past expiry date (IBI omitted the closing debit)
 
 **Controls:**
 - Toggle "Open positions only" (default: on)
@@ -967,7 +971,8 @@ Each Excel row gets a SHA-256 hash. On insert, `INSERT OR IGNORE` skips rows wit
 |-------|---------|-------------|
 | **Agorot Prices** | TASE prices in 1/100 shekel | `normalize_price()` ÷ 100 for TASE |
 | **API Agorot** | Some APIs also return agorot | `_normalize_tase()` auto-detects and divides |
-| **Option Expiry Order** | Credit appears after sell on same date | `_reorder_options_expiry()` adjusts sort keys |
+| **Option Expiry Order** | Credit (הפקדה פקיעה) appears after sell on same date | `_reorder_options_expiry()` assigns tier `_12` so credits run after removes (`_11`); short position exists when credit closes it |
+| **Missing Expiry Debit** | IBI omits `משיכה פקיעה` for some long options; position stays open forever | `parse_option_expiry()` reads `M[Y][MM]` from the name; options_view overrides past-expiry LONG → CLOSED |
 | **Phantom Transactions** | Internal entries (taxes, forex) look like real trades | `detect_phantom()` filters by symbol/name patterns |
 | **NIS Cash Balance** | No initial balance in data | Uses IBI's own `balance` column directly |
 | **Pre-Transfer Shares** | Sells reference shares bought before data starts | Auto-creates phantom shares at ₪0 cost basis |
@@ -979,14 +984,15 @@ Each Excel row gets a SHA-256 hash. On insert, `INSERT OR IGNORE` skips rows wit
 
 ## 8. Test Suite
 
-88 tests across 4 files:
+104 tests across 5 files:
 
 | File | Tests | Coverage |
 |------|-------|----------|
-| `test_builder.py` | Portfolio build algorithm | Buy/sell/split/deposit flows, position tracking, cash balances, realized P&L |
+| `test_builder.py` | Portfolio build algorithm | Buy/sell/split/deposit flows, position tracking, cash balances, realized P&L, option short-sell + expiry cycle |
 | `test_classifier.py` | Transaction classification | Phantom detection, 21 types, price normalization, agorot conversion |
 | `test_performance_metrics.py` | Metric calculations | CAGR, max drawdown, Sharpe ratio, cumulative returns |
 | `test_repository.py` | Database CRUD | Insert, fetch, dedup, cache operations |
+| `test_symbol_mapper.py` | Symbol detection + expiry parsing | `is_option()` regex patterns, `parse_option_expiry()` for various name formats |
 
 **Run tests:**
 ```bash
