@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.dashboard import theme
 from src.dashboard.styles import section_header, html_table
-from src.dashboard.components.charts import _display_label
+from src.dashboard.components.charts import _display_label, _tase_ticker, _tase_name
 from src.database import repository
 
 
@@ -38,7 +38,7 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
         pnl = (value_nis - cost_nis) if value_nis is not None else None
         pnl_pct = (pnl / cost_nis * 100) if (pnl is not None and cost_nis > 0) else None
         rows.append({
-            "Symbol": sym, "Name": pos.security_name or "—",
+            "Symbol": _tase_ticker(sym, pos), "Name": _tase_name(sym, pos),
             "Display": _display_label(sym, pos),
             "Mkt": pos.market, "Qty": pos.quantity,
             "Cost ₪": cost_nis, "Price ₪": price,
@@ -53,7 +53,7 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
         pnl = (value_nis - cost_nis) if value_nis is not None else None
         pnl_pct = (pnl / cost_nis * 100) if (pnl is not None and cost_nis > 0) else None
         rows.append({
-            "Symbol": sym, "Name": pos.security_name or "—",
+            "Symbol": _tase_ticker(sym, pos), "Name": _tase_name(sym, pos),
             "Display": _display_label(sym, pos),
             "Mkt": pos.market, "Qty": pos.quantity,
             "Cost ₪": cost_nis, "Price ₪": price_nis,

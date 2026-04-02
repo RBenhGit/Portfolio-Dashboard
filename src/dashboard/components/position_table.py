@@ -3,6 +3,7 @@ import streamlit as st
 from typing import Optional
 
 from src.dashboard.styles import html_table
+from src.dashboard.components.charts import _tase_ticker, _tase_name
 
 
 def render_position_table(
@@ -30,8 +31,8 @@ def render_position_table(
         pnl_pct = (pnl / cost_value * 100) if (pnl is not None and cost_value > 0) else None
 
         rows.append({
-            "Symbol": sym,
-            "Name": pos.security_name or "—",
+            "Symbol": _tase_ticker(sym, pos),
+            "Name": _tase_name(sym, pos),
             "Mkt": pos.market,
             "Qty": pos.quantity,
             "Avg Cost": pos.average_cost,

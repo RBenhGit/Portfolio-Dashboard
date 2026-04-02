@@ -11,19 +11,47 @@ from src.market.benchmark_fetcher import get_risk_free_rate
 
 
 def _display_label(sym: str, pos) -> str:
-    """Resolve a human-readable label for chart display.
+    """Label for charts/graphs: TASE → 'SCOP (288019)', US → symbol as-is."""
+    if pos.market == "TASE":
+        mapping = repository.get_tase_symbol(sym)
+        ticker = mapping.get("td_symbol") if mapping else None
+        if ticker:
+            return f"{ticker} ({sym})"
+    return sym
 
-    TASE stocks: use resolved ticker (e.g. 'MTRX') from tase_symbol_map,
-    falling back to security_name, then raw symbol.
-    US stocks: use the symbol as-is.
-    """
+
+def _tase_ticker(sym: str, pos) -> str:
+    """Return 'TICKER (IBI_ID)' for TASE stocks (e.g. 'SCOP (288019)'), or sym as-is for US."""
     if pos.market == "TASE":
         mapping = repository.get_tase_symbol(sym)
         if mapping and mapping.get("td_symbol"):
-            return mapping["td_symbol"]
-        if pos.security_name:
-            return pos.security_name
+            return f"{mapping['td_symbol']} ({sym})"
     return sym
+
+
+def _tase_name(sym: str, pos) -> str:
+    """Return the plain security name for a TASE stock, or sym as-is for US."""
+    if pos.market == "TASE":
+        mapping = repository.get_tase_symbol(sym)
+        name = (mapping.get("name") if mapping else None) or pos.security_name
+        if name:
+            return name
+    return pos.security_name or sym
+
+
+def _display_label_text(sym: str, pos) -> str:
+    """Label for tables and text: TASE → 'Scope Metals Group | SCOP (288019)', US → name or symbol."""
+    if pos.market == "TASE":
+        mapping = repository.get_tase_symbol(sym)
+        ticker = mapping.get("td_symbol") if mapping else None
+        name = (mapping.get("name") if mapping else None) or pos.security_name
+        if ticker and name:
+            return f"{name} | {ticker} ({sym})"
+        if ticker:
+            return f"{ticker} ({sym})"
+        if name:
+            return name
+    return pos.security_name or sym
 
 
 def allocation_pie(

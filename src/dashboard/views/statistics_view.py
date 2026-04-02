@@ -11,7 +11,7 @@ import streamlit as st
 from src.dashboard import theme
 from src.dashboard.styles import section_header, metric_card_html, html_table
 from src.dashboard.components.charts import (
-    _display_label, allocation_treemap,
+    _display_label, _display_label_text, allocation_treemap,
 )
 from src.dashboard.components.performance_metrics import (
     compute_cagr,
@@ -56,7 +56,7 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
         pnl = value - cost
         pnl_pct = (pnl / cost * 100) if cost else 0.0
         rows.append({
-            "symbol": sym, "label": _display_label(sym, pos),
+            "symbol": sym, "label": _display_label_text(sym, pos),
             "cost": cost, "value": value, "pnl": pnl,
             "pnl_pct": pnl_pct, "market": "NIS", "type": "stock",
         })
@@ -71,7 +71,7 @@ def render(portfolio: dict, prices: dict, price_date: str = "") -> None:
         pnl = value - cost
         pnl_pct = (pnl / cost * 100) if cost else 0.0
         rows.append({
-            "symbol": sym, "label": _display_label(sym, pos),
+            "symbol": sym, "label": _display_label_text(sym, pos),
             "cost": cost, "value": value, "pnl": pnl,
             "pnl_pct": pnl_pct, "market": "USD", "type": "stock",
         })
