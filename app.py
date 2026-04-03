@@ -45,7 +45,7 @@ from src.database import repository
 from src.portfolio.ingestion import ingest
 from src.portfolio import builder
 from src.market.price_fetcher import fetch_prices_for_positions, check_twelvedata_status
-from src.dashboard.views import portfolio_view, merged_view, options_view, performance_view, statistics_view
+from src.dashboard.views import portfolio_view, merged_view, options_view, performance_view, statistics_view, cashflow_view
 
 
 # ── Startup: ensure DB exists and Excel is parsed ─────────────────────────────
@@ -178,8 +178,8 @@ prices = _get_prices(
     price_date,
 )
 
-tab_stats, tab_performance, tab_tase, tab_us, tab_merged, tab_options = st.tabs(
-    ["📊 Statistics", "📈 Performance", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options"]
+tab_stats, tab_performance, tab_tase, tab_us, tab_merged, tab_options, tab_cashflow = st.tabs(
+    ["📊 Statistics", "📈 Performance", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options", "💰 Cash Flow"]
 )
 
 with tab_stats:
@@ -205,3 +205,6 @@ with tab_options:
 
 with tab_performance:
     performance_view.render()
+
+with tab_cashflow:
+    cashflow_view.render(portfolio)

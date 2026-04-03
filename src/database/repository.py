@@ -430,3 +430,31 @@ def is_portfolio_stale() -> bool:
         return False  # no imports ever → cached data is valid
 
     return import_row["imported_at"] > built_at
+
+
+# ── Cash flow ────────────────────────────────────────────────────────────────
+
+def get_cash_flow_transactions() -> list[sqlite3.Row]:
+    """Return non-phantom transactions that have non-zero cash flow, ordered by date.
+
+    Note: includes phantom rows with cash flow (USD dividends, foreign taxes)
+    since those have real cash impact despite being phantom for position tracking.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date, transaction_type, effect, security_name, security_symbol, "
+        "market, currency, cash_flow_nis, cash_flow_usd, commission, additional_fees "
+        "FROM transactions "
+        "WHERE cash_flow_nis != 0 OR cash_flow_usd != 0 "
+        "ORDER BY date ASC"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_fx_rates() -> dict[str, float]:
+    """Return {date: usd_ils} for all stored FX rates."""
+    conn = get_connection()
+    rows = conn.execute("SELECT date, usd_ils FROM fx_rates ORDER BY date").fetchall()
+    conn.close()
+    return {r["date"]: r["usd_ils"] for r in rows}

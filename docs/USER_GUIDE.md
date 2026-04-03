@@ -32,9 +32,9 @@ The IBI Portfolio Dashboard is a **Streamlit-based investment portfolio tracker*
 
 | Feature | Description |
 |---------|-------------|
-| **21 Transaction Types** | Buys, sells, dividends, splits, options, deposits, withdrawals, fees, taxes |
+| **22 Transaction Types** | Buys, sells, dividends, splits, options, deposits, withdrawals, fees, taxes, forex buy/sell |
 | **Multi-Currency** | Dual tracking in native currency + NIS equivalent with historical FX rates |
-| **6 Dashboard Tabs** | Statistics, Performance, TASE (₪), US ($), Merged (₪), Options |
+| **7 Dashboard Tabs** | Statistics, Performance, TASE (₪), US ($), Merged (₪), Options, Cash Flow |
 | **8 Chart Types** | Area, drawdown, bar, treemap, waterfall, pie, rolling Sharpe, monthly returns |
 | **Benchmark Comparison** | S&P 500 and TA-125 with indexed returns |
 | **Performance Metrics** | CAGR, Sharpe ratio, max drawdown, cumulative returns |
@@ -262,9 +262,11 @@ Classifies all 21 IBI transaction types:
 
 | Hebrew Type | Effect | Direction | Notes |
 |-------------|--------|-----------|-------|
-| קניה שח / קניה רצף / קניה מעוף | `buy` | add | NIS buy (symbol 99028 = forex) |
+| קניה שח / קניה רצף / קניה מעוף | `buy` | add | NIS buy |
+| קניה שח (symbol 99028, name "B USD/ILS") | `forex_buy` | — | NIS→USD conversion; cash_flow_nis=amount_lc (neg), cash_flow_usd=+qty (phantom) |
 | קניה חול מטח | `buy` | add | USD buy |
 | מכירה שח / מכירה רצף / מכירה מעוף | `sell` | remove | NIS sell |
+| מכירה שח (symbol 99028, name "S USD/ILS") | `forex_sell` | — | USD→NIS conversion; cash_flow_usd=-abs(qty), cash_flow_nis=amount_lc (phantom) |
 | מכירה חול מטח | `sell` | remove | USD sell |
 | הפקדה | `deposit` | add/remove | Share transfer in/out |
 | הפקדה פקיעה | `option_expiry` | add | Option expiry credit |
@@ -868,6 +870,52 @@ Options positions with direction classification.
 
 ---
 
+#### Tab 7: Cash Flow View (`cashflow_view.py`)
+
+##### `render(portfolio: dict) -> None`
+
+Full cash-flow analysis. Receives the `portfolio` dict (built by `builder.build()`) so it has access to live cash balances and invested positions.
+
+**Section 0 — Capital Allocation**
+
+Answers the key question: how much is in stocks vs free cash, in each currency.
+
+| Card | Value | Source |
+|------|-------|--------|
+| Free Cash (NIS) | `portfolio["nis_cash"]` | IBI running balance column |
+| Free Cash (USD) | `portfolio["usd_cash"]` | Accumulated USD cash flows |
+| Total Free Cash (NIS equiv.) | `nis_cash + usd_cash × latest_fx` | Computed |
+| Invested (NIS) | Sum of `total_invested` across NIS positions | `portfolio["positions_nis"]` |
+| Invested (USD) | Sum of `total_invested` across USD positions | `portfolio["positions_usd"]` |
+| Total Invested (NIS equiv.) | `nis_invested + usd_invested × latest_fx` | Computed |
+
+**Section 1 — Cash Flow Summary**
+
+Separated into two rows to distinguish external flows from investment income:
+
+- **Row 1 (External flows):** Deposits, Withdrawals, Net External Flow
+- **Row 2 (Investment income):** Dividends, Fees & Taxes, Net Investment Income
+
+**Sections 2–4:** Cumulative cash flow over time, monthly bar chart, and category breakdown charts (bar + pie). Categories use updated labels:
+
+| Effect | Category |
+|--------|----------|
+| `buy` | Stock Purchases |
+| `sell` | Stock Sales |
+| `forex_buy` | Forex Conversion |
+| `forex_sell` | Forex Conversion |
+| `dividend` | Dividends |
+| `interest` | Interest |
+| `fee` | Fees |
+| `tax` / `interest_tax` | Taxes |
+| `transfer` (positive) | Transfers In |
+| `transfer` (negative) | Transfers Out |
+
+**Section 5:** Yearly summary table (cash in, cash out, net, dividends, fees).  
+**Section 6:** Transaction detail expander (last 200 rows).
+
+---
+
 ## 5. Financial Theory Reference
 
 ### Cumulative Returns (Indexed to 100)
@@ -979,6 +1027,7 @@ Each Excel row gets a SHA-256 hash. On insert, `INSERT OR IGNORE` skips rows wit
 | **Hebrew Column Names** | All columns in Hebrew | `COLUMN_MAP` translates to English |
 | **Date Format** | DD/MM/YYYY | Parsed to YYYY-MM-DD |
 | **Dual-Listed Stocks** | NIS currency but US market | Detected by ticker pattern (1–6 uppercase letters) |
+| **USD → NIS Forex (forex_sell)** | `מכירה שח` on symbol 99028 (name "S USD/ILS") was silently ignored because 99028 is phantom and the NIS-sell handler had `if not is_phantom`. The USD sold was never deducted, inflating `usd_cash` by ~$35,842 across 10 transactions. | Added explicit `sym == "99028"` check in the NIS-sell branch (mirroring the existing `forex_buy` logic): sets `effect="forex_sell"`, `cash_flow_usd = -abs(qty)`, `cash_flow_nis = amount_lc`. Existing DB rows patched with a one-time SQL UPDATE. |
 
 ---
 
@@ -1001,4 +1050,4 @@ pytest tests/ -v
 
 ---
 
-*Generated 2026-03-10 for Portfolio Dashboard v1.x*
+*Generated 2026-03-10 for Portfolio Dashboard v1.x — Updated 2026-04-03 (Cash Flow tab, forex_sell fix)*

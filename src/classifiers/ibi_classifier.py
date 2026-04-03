@@ -90,7 +90,15 @@ class IBIClassifier(BaseClassifier):
 
         # ── NIS SELLS ────────────────────────────────────────────────────────
         elif tx_type in ("מכירה שח", "מכירה רצף", "מכירה מעוף"):
-            if not is_phantom:
+            if sym == "99028":
+                # Special case: USD → NIS forex conversion (reverse of forex_buy)
+                # IBI records this as "מכירה שח" with symbol 99028
+                # qty = USD amount sold; amount_lc = NIS received (positive)
+                effect        = "forex_sell"
+                is_phantom    = True
+                cash_flow_nis = amount_lc             # positive (NIS in)
+                cash_flow_usd = -abs(qty)             # negative (USD out)
+            elif not is_phantom:
                 effect             = "sell"
                 share_direction    = "remove"
                 share_quantity_abs = abs(qty)         # IBI qty positive for sells

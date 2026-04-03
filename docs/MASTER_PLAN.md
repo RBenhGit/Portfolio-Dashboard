@@ -13,7 +13,8 @@ May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction
 - Tab 4: US ($) — full-width USD positions
 - Tab 5: Merged portfolio (all in ₪ using historically-correct FX rates)
 - Tab 6: Options — open options positions (NIS + USD)
-- All 21 IBI transaction types handled correctly, including stock splits
+- Tab 7: Cash Flow — capital allocation (invested vs free cash per currency), external flows, investment income, charts and history
+- All 22 IBI transaction types handled correctly, including stock splits and USD↔NIS forex conversions
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
 - User can upload new Excel files → deduplicated merge into DB
@@ -77,6 +78,7 @@ app.py → Streamlit
     Tab 4: US ($) — full-width USD positions
     Tab 5: Merged (₪) — all positions converted to shekels
     Tab 6: Options — open options positions
+    Tab 7: Cash Flow — capital allocation, external flows, investment income, history
 
 src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 ```
@@ -137,7 +139,8 @@ Portfolio_Dashboard/
         │   ├── performance_view.py    # Tab 2: Up to 8 charts + benchmark comparison
         │   ├── portfolio_view.py      # Tabs 3-4: Single-market at full width
         │   ├── merged_view.py         # Tab 5: All positions unified in ₪
-        │   └── options_view.py        # Tab 6: Open options with direction badges
+        │   ├── options_view.py        # Tab 6: Open options with direction badges
+        │   └── cashflow_view.py       # Tab 7: Capital allocation + full cash-flow analysis
         └── components/
             ├── position_table.py      # Reusable styled HTML position table
             ├── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
@@ -341,8 +344,10 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 | Hebrew Type | Effect | share_direction | cash_flow_nis | cash_flow_usd | Notes |
 |---|---|---|---|---|---|
 | קניה שח / קניה רצף / קניה מעוף | buy | add | amount_local_currency (neg) | 0 | NIS buy |
+| קניה שח (sym 99028, name "B USD/ILS") | forex_buy | none | amount_local_currency (neg) | +quantity | NIS→USD conversion; phantom |
 | קניה חול מטח | buy | add | 0 | amount_foreign_currency (neg) | USD buy |
 | מכירה שח / מכירה רצף / מכירה מעוף | sell | remove | abs(amount_local_currency) | 0 | NIS sell; IBI qty is POSITIVE |
+| מכירה שח (sym 99028, name "S USD/ILS") | forex_sell | none | amount_local_currency (pos) | -abs(quantity) | USD→NIS conversion; phantom |
 | מכירה חול מטח | sell | remove | 0 | abs(amount_foreign_currency) | USD sell |
 | הפקדה | deposit | add | 0 | 0 | Pre-existing or transfer-in of shares |
 | הפקדה פקיעה | option_expiry | add | 0 | 0 | Options settlement credit |
@@ -357,7 +362,6 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 | משיכת מס מטח | tax | none | 0 | amount_foreign_currency (neg) | Phantom |
 | העברה מזומן בשח | transfer | none | +/- amount_local_currency | 0 | Cash in/out NIS |
 | דמי טפול מזומן בשח | fee | none | amount_local_currency (neg) | 0 | NIS fee |
-| B USD/ILS (symbol 99028) | forex_buy | none | amount_local_currency (neg) | +quantity | NIS→USD conversion |
 
 > **Note on הטבה:** Before coding, inspect all 7 rows in the DB.
 > If `execution_price == 0` and `security_symbol` matches an existing position → treat as **stock split** (apply ratio = (current_qty + new_shares_added) / current_qty, adjust avg_cost).
@@ -372,7 +376,7 @@ This allows plugging in future broker adapters (e.g., Interactive Brokers, Meita
 ### Phantom Detection (exclude from portfolio entirely)
 
 - `security_symbol` starts with "999" → IBI tax accounts (9993983, 9993975, 9993971)
-- `security_symbol == "99028"` → USD/ILS forex tracking (handle as forex_buy, not a stock)
+- `security_symbol == "99028"` → USD/ILS forex tracking (handle as `forex_buy` for NIS→USD buys, `forex_sell` for USD→NIS sells — never a stock position)
 - `security_symbol == "5039813"` → Options settlement clearing account
 - `security_name` contains: מס לשלם / מס ששולם / מס תקבולים / הכנס תשלום מעוף
 
@@ -666,6 +670,30 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 Rendered via `options_view.render(options_nis, options_usd)`. NIS and USD options are merged into a single table with a Currency column. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
 
 
+### Tab 7: Cash Flow — capital allocation and transaction history
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│  Capital Allocation                                                        │
+│  Free Cash (NIS) | Free Cash (USD) | Total Free Cash (₪ equiv.)           │
+│  Invested (NIS)  | Invested (USD)  | Total Invested  (₪ equiv.)           │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Cash Flow Summary                                                         │
+│  Deposits | Withdrawals | Net External Flow                                │
+│  Dividends | Fees & Taxes | Net Investment Income                          │
+├────────────────────────────────────────────────────────────────────────────┤
+│  [Cumulative Cash Flow Over Time — line chart]                             │
+│  [Monthly Cash Flow — bar + line chart]                                    │
+│  [Net Flow by Category — horizontal bar] | [Inflow Composition — pie]     │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Yearly Summary Table                                                      │
+│  [Transaction Details — expander, last 200 rows]                          │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `cashflow_view.render(portfolio)`. Receives the full portfolio dict so the Capital Allocation section can read live `nis_cash`, `usd_cash`, and position totals. Categories use `_EFFECT_TO_CATEGORY` map: stock purchases/sales labeled separately from external transfers; both `forex_buy` and `forex_sell` map to "Forex Conversion".
+
+
 ### Sidebar
 
 - **Import new transactions:** `st.file_uploader` (`.xlsx`)
@@ -811,9 +839,11 @@ yfinance>=0.2.66
 14. ✅ **Views** — `portfolio_view.py` (Tab 3: TASE, Tab 4: US), `merged_view.py` (Tab 5)
 15. ✅ **Options tab** — `options_view.py` (Tab 6: open options positions)
 16. ✅ **Performance tab** — `performance_view.py` (Tab 2: historical returns + benchmarks), `benchmark_fetcher.py`
-17. ✅ **App entry point** — `app.py` (6 tabs + sidebar uploader)
+17. ✅ **App entry point** — `app.py` (7 tabs + sidebar uploader)
 18. ✅ **Statistics tab** — `statistics_view.py` (Tab 1: portfolio summary, performance metrics, trading activity, risk & diversification)
 19. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
+20. ✅ **Cash Flow tab** — `cashflow_view.py` (Tab 7: Capital Allocation section + full cash-flow analysis with corrected categories)
+21. ✅ **forex_sell bug fix** — `ibi_classifier.py`: `מכירה שח` on symbol 99028 ("S USD/ILS") was classified as `effect=none` (phantom guard blocked it). Added explicit `sym == "99028"` branch that sets `effect="forex_sell"`, `cash_flow_usd=-abs(qty)`, `cash_flow_nis=amount_lc`. Patched 10 existing DB rows. USD cash discrepancy reduced from ~$35,897 to ~$55 (rounding).
 
 ---
 
