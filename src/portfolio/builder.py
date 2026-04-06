@@ -6,8 +6,10 @@ Produces:
   - daily_portfolio_state (per unique transaction date)
   - realized_trades (per sell)
 """
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.database import repository
 from src.market.price_fetcher import get_price
@@ -39,6 +41,69 @@ def _reorder_options_expiry(transactions: list) -> list:
     return sorted(transactions, key=sort_key)
 
 
+_INITIAL_POS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "initial_positions.json"
+
+
+def _load_initial_positions(
+    positions_nis: dict[str, Position],
+    positions_usd: dict[str, Position],
+    transactions: list[dict],
+) -> None:
+    """Seed positions from config/initial_positions.json (pre-export holdings).
+
+    These are shares acquired before the IBI Excel export period.  The config
+    stores NIS cost basis; we derive USD cost using the FX rate on the earliest
+    transaction date.
+    """
+    if not _INITIAL_POS_PATH.exists():
+        return
+
+    try:
+        data = json.loads(_INITIAL_POS_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Could not read initial_positions.json: %s", exc)
+        return
+
+    entries = data.get("positions", [])
+    if not entries:
+        return
+
+    # FX rate near the earliest transaction date (for NIS → USD conversion).
+    # The exact date may be a weekend/holiday, so scan the first few dates.
+    fx_rate = None
+    seen_dates = dict.fromkeys(tx["date"] for tx in transactions[:50])
+    for d in seen_dates:
+        fx_rate = repository.get_fx_rate(d)
+        if fx_rate is not None:
+            break
+
+    for entry in entries:
+        sym = entry["symbol"]
+        currency = entry.get("currency", "$")
+        positions = positions_nis if currency == "₪" else positions_usd
+        cost_nis = entry["cost_basis_nis"]
+
+        if currency == "$" and fx_rate:
+            cost_usd = cost_nis / fx_rate
+        else:
+            cost_usd = cost_nis  # NIS positions: cost is already in NIS
+
+        pos = Position(
+            security_symbol=sym,
+            security_name=entry.get("security_name"),
+            market=entry.get("market", "US"),
+            currency=currency,
+            quantity=entry["quantity"],
+            total_invested=cost_usd if currency == "$" else cost_nis,
+            total_invested_nis=cost_nis,
+        )
+        positions[sym] = pos
+        logger.info(
+            "Seeded pre-export position: %s qty=%.2f cost=%s%.2f (NIS %.2f)",
+            sym, pos.quantity, currency, pos.total_invested, cost_nis,
+        )
+
+
 def build(trigger: str = "startup") -> dict:
     """Run the full sequential portfolio build.
 
@@ -61,6 +126,9 @@ def build(trigger: str = "startup") -> dict:
     cum_realized_pnl_nis = 0.0
     cum_realized_pnl_usd = 0.0
     current_date: str | None = None
+
+    # Seed pre-export holdings (shares acquired before the IBI Excel period)
+    _load_initial_positions(positions_nis, positions_usd, transactions)
 
     # Clear tables we recompute fully
     repository.clear_daily_portfolio_state()

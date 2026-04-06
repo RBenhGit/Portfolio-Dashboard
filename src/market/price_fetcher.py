@@ -16,14 +16,16 @@ import re
 
 from src.config import TWELVEDATA_API_KEY, YFINANCE_ENABLED
 from src.database import repository
-from src.market.symbol_mapper import is_option, resolve_tase_symbol, tase_yfinance_symbol, twelvedata_params
+from src.market.symbol_mapper import (
+    is_option, resolve_tase_symbol, resolve_us_numeric_ticker,
+    tase_yfinance_symbol, twelvedata_params,
+)
 
 _TASE_NUM_RE = re.compile(r'^\d{5,8}$')
 
 logger = logging.getLogger(__name__)
 _TD_BASE = "https://api.twelvedata.com"
 _last_source = "unknown"
-_tase_price_in_agorot: bool | None = None
 
 
 def get_price(security_symbol: str, market: str,
@@ -50,6 +52,18 @@ def _fetch_historical(symbol: str, market: str,
                       price_date: str = "") -> Optional[float]:
     """Fetch the closing price for *symbol* on *price_date*."""
     global _last_source
+
+    # For US stocks stored with a numeric IBI ID, resolve to the real ticker first
+    if market == "US" and _TASE_NUM_RE.match(symbol):
+        real_ticker = resolve_us_numeric_ticker(symbol)
+        if real_ticker:
+            symbol = real_ticker
+        else:
+            logger.warning(
+                "Skipping price fetch: unknown US numeric IBI ID %s (%s) on %s",
+                symbol, security_name or "unknown", price_date,
+            )
+            return None
 
     # For TASE numeric IDs, resolve first — skip all API calls if unresolvable
     if market == "TASE" and _TASE_NUM_RE.match(symbol):
@@ -119,7 +133,7 @@ def _fetch_td_historical(symbol: str, market: str,
             price = float(item["close"])
             logger.info("Twelvedata historical price for %s on %s: %.4f",
                         params.get("symbol"), item_date, price)
-            return _normalize_tase(price, market, symbol)
+            return _normalize_tase(price, market, "twelvedata")
 
     return None
 
@@ -157,30 +171,30 @@ def _fetch_yf_historical(symbol: str, market: str,
         else:
             price = float(hist["Close"].iloc[0])
 
-    return _normalize_tase(price, market, symbol)
+    return _normalize_tase(price, market, "yfinance")
 
 
-def _normalize_tase(price: float, market: str, symbol: str) -> float:
-    """Divide by 100 for TASE stocks if prices are in agorot."""
-    global _tase_price_in_agorot
+def _normalize_tase(price: float, market: str, source: str) -> float:
+    """Convert TASE price to shekels if the source returns agorot (ILA).
+
+    yfinance always returns TASE prices in ILA (agorot) — divide by 100.
+    Twelvedata: per-price heuristic (no global state).
+    """
     if market != "TASE":
         return price
 
-    if _tase_price_in_agorot is True:
+    if source == "yfinance":
+        # yfinance .TA always reports currency=ILA (agorot)
         return price / 100.0
-    if _tase_price_in_agorot is False:
-        return price
 
-    # Auto-detect: TASE shekel prices for real stocks are typically < 10000.
-    # If we get > 500, assume agorot.
-    if price > 500:
+    # Twelvedata or unknown source: per-price heuristic.
+    # No TASE stock trades above ₪10,000; prices above that are agorot.
+    if price > 10_000:
         logger.info(
-            "TASE %s price=%.2f > 500 → detected agorot, dividing by 100", symbol, price
+            "TASE price=%.2f > 10000 → likely agorot (%s), dividing by 100",
+            price, source,
         )
-        _tase_price_in_agorot = True
         return price / 100.0
-    logger.info("TASE %s price=%.2f → assumed shekels", symbol, price)
-    _tase_price_in_agorot = False
     return price
 
 

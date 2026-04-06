@@ -21,15 +21,20 @@ _TX_COLS = [
 ]
 
 
-def insert_transactions_deduped(transactions: list[dict]) -> tuple[int, int]:
+def insert_transactions_deduped(transactions: list[dict],
+                                force: bool = False) -> tuple[int, int]:
     """Insert classified transactions; skip duplicates by row_hash.
-    Returns (rows_new, rows_duplicate).
+
+    When *force=True* (forced re-parse), uses INSERT OR REPLACE so that
+    existing rows are overwritten with freshly classified values (e.g. a
+    corrected *market* column).  Returns (rows_new, rows_duplicate).
     """
     if not transactions:
         return 0, 0
     placeholders = ", ".join("?" * len(_TX_COLS))
+    conflict = "REPLACE" if force else "IGNORE"
     sql = (
-        f"INSERT OR IGNORE INTO transactions ({', '.join(_TX_COLS)}) "
+        f"INSERT OR {conflict} INTO transactions ({', '.join(_TX_COLS)}) "
         f"VALUES ({placeholders})"
     )
     conn = get_connection()

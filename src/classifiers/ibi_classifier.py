@@ -1,6 +1,7 @@
 """IBI broker transaction classifier — all 21 transaction types."""
 import re
 from src.classifiers.base_classifier import BaseClassifier
+from src.market.symbol_mapper import detect_market
 
 _PHANTOM_SYMBOL_PREFIXES = ("999",)
 _PHANTOM_SYMBOLS = {"99028", "5039813"}
@@ -9,8 +10,6 @@ _PHANTOM_NAME_KEYWORDS = (
     "הכנס/תשלום מעוף", "הכנס תשלום מעוף",
 )
 
-_US_TICKER_RE = re.compile(r'^[A-Z]{1,6}$')
-_TASE_NUMERIC_RE = re.compile(r'^\d{5,8}$')
 _OPTION_RE = re.compile(r'^[89]\d{7}$')
 
 
@@ -29,17 +28,10 @@ class IBIClassifier(BaseClassifier):
         return False
 
     def _detect_market(self, row: dict) -> str:
-        currency = str(row.get("currency", "")).strip()
-        sym      = str(row.get("security_symbol", "")).strip()
-        # Numeric IDs (5-8 digits) are always TASE instruments,
-        # even if denominated in $ (e.g. dollar-linked bonds/ETFs)
-        if _TASE_NUMERIC_RE.match(sym):
-            return "TASE"
-        if currency == "$":
-            return "US"
-        if currency == "₪" and _US_TICKER_RE.match(sym):
-            return "US"   # dual-listed ETF/ADR on TASE
-        return "TASE"
+        return detect_market(
+            str(row.get("security_symbol", "")).strip(),
+            str(row.get("currency", "")).strip(),
+        )
 
     def classify(self, row: dict) -> dict:  # noqa: C901  (complex but intentional)
         tx_type   = str(row.get("transaction_type", "")).strip()

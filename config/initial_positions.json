@@ -1,0 +1,37 @@
+{
+  "_comment": "Pre-export holdings not in IBI Excel. Seeded into builder as opening positions on the earliest transaction date (2022-05-06). Cost derived from broker FIFO avg (מ.ממוצע FIFO בוקר) x missing qty.",
+  "positions": [
+    {
+      "symbol": "MSFT",
+      "security_name": "MICROSOFT(MSFT)",
+      "market": "US",
+      "currency": "$",
+      "quantity": 7,
+      "cost_basis_nis": 7864.99
+    },
+    {
+      "symbol": "IBM",
+      "security_name": "INT'L BUSI(IBM)",
+      "market": "US",
+      "currency": "$",
+      "quantity": 3,
+      "cost_basis_nis": 2189.94
+    },
+    {
+      "symbol": "JPM",
+      "security_name": "J.P. MORGAN(JPM)",
+      "market": "US",
+      "currency": "$",
+      "quantity": 4,
+      "cost_basis_nis": 2910.96
+    },
+    {
+      "symbol": "TSLA",
+      "security_name": "TESLA MOT(TSLA)",
+      "market": "US",
+      "currency": "$",
+      "quantity": 1,
+      "cost_basis_nis": 1151.04
+    }
+  ]
+}

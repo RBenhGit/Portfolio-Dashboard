@@ -162,7 +162,8 @@ def allocation_treemap(
             cmid=0,
             line=dict(width=2, color=theme.BG_PRIMARY),
         ),
-        textinfo="label+percent parent",
+        textinfo="label+percent parent+value",
+        texttemplate="%{label}<br>%{percentParent:.1%}<br>" + currency_symbol + "%{value:,.0f}",
         hovertemplate=("<b>%{label}</b><br>"
                        f"Value: {currency_symbol}%{{value:,.0f}}<br>"
                        "P&L: %{color:+.1f}%<extra></extra>"),

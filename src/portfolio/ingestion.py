@@ -74,8 +74,10 @@ def ingest(source: Union[str, Path], trigger: str = "import") -> dict:
             else:
                 r["cost_basis_nis"] = cb
 
-    # Insert (dedup by row_hash)
-    rows_new, rows_dup = repository.insert_transactions_deduped(classified)
+    # Insert (dedup by row_hash); force=True re-applies current classifier to existing rows
+    rows_new, rows_dup = repository.insert_transactions_deduped(
+        classified, force=(trigger == "force")
+    )
     logger.info("Inserted %d new rows, %d duplicates skipped", rows_new, rows_dup)
     repository.log_import(source.name, rows_total, rows_new, rows_dup)
 
