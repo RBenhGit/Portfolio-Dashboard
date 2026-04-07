@@ -32,14 +32,14 @@ The IBI Portfolio Dashboard is a **Streamlit-based investment portfolio tracker*
 
 | Feature | Description |
 |---------|-------------|
-| **22 Transaction Types** | Buys, sells, dividends, splits, options, deposits, withdrawals, fees, taxes, forex buy/sell |
+| **21 Transaction Types** | Buys, sells, dividends, splits, options, deposits, withdrawals, fees, taxes (+ forex as special cases of buy/sell) |
 | **Multi-Currency** | Dual tracking in native currency + NIS equivalent with historical FX rates |
 | **7 Dashboard Tabs** | Statistics, Performance, TASE (₪), US ($), Merged (₪), Options, Cash Flow |
 | **8 Chart Types** | Area, drawdown, bar, treemap, waterfall, pie, rolling Sharpe, monthly returns |
 | **Benchmark Comparison** | S&P 500 and TA-125 with indexed returns |
 | **Performance Metrics** | CAGR, Sharpe ratio, max drawdown, cumulative returns |
 | **Smart Caching** | Fast-load portfolio cache, price cache, FX cache, benchmark cache |
-| **88 Unit Tests** | Builders, classifiers, metrics, and database CRUD |
+| **104 Unit Tests** | Builders, classifiers, metrics, symbol mapper, and database CRUD |
 
 ### Project Structure
 
@@ -52,7 +52,7 @@ Portfolio_Dashboard/
 │   └── Transactions_IBI.xlsx        # IBI broker export (~2,065 rows)
 ├── data/
 │   └── portfolio.db                 # SQLite database (auto-created)
-├── tests/                           # 4 test files, 88 tests
+├── tests/                           # 5 test files, 104 tests
 ├── docs/                            # Documentation
 └── src/
     ├── config.py                    # Central configuration
@@ -140,7 +140,7 @@ IBI Excel (.xlsx)
              │
              ▼
 ┌────────────────────────────────────────┐
-│  Streamlit Dashboard (6 tabs)          │
+│  Streamlit Dashboard (7 tabs)          │
 │  Load cached portfolio + prices        │
 │  Render charts, tables, metrics        │
 └────────────────────────────────────────┘
@@ -152,7 +152,7 @@ IBI Excel (.xlsx)
 2. **`_initial_ingest()`** — Parse Excel if DB is empty
 3. **`_get_portfolio()`** — Load portfolio from fast-load cache or rebuild
 4. **`_get_prices()`** — Fetch current market prices
-5. **Render 6 tabs** — Pass portfolio + prices to each view
+5. **Render 7 tabs** — Pass portfolio + prices to each view
 
 ---
 

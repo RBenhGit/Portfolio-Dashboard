@@ -26,7 +26,7 @@ IBI Excel (.xlsx) → excel_reader → IBIClassifier → repository (SQLite) →
 - **Price Fetcher** (`src/market/price_fetcher.py`): Twelvedata primary, yfinance fallback. Caches in `price_cache` table.
 - **Symbol Mapper** (`src/market/symbol_mapper.py`): Resolves IBI numeric IDs to tickers. Chain: runtime cache → DB → `_KNOWN_TASE_MAP` → Twelvedata search.
 - **Dashboard**: `app.py` → 7 tabs (Statistics, Performance, TASE ₪, US $, Merged ₪, Options, Cash Flow). Views in `src/dashboard/views/`, components in `src/dashboard/components/`.
-- **Database**: SQLite `data/portfolio.db`. Tables: `transactions`, `price_cache`, `fx_rates`, `daily_portfolio_state`, `realized_trades`, `portfolio_current`, `tase_symbol_map`, `benchmark_cache`. Schema in `src/database/db.py`.
+- **Database**: SQLite `data/portfolio.db`. Tables: `transactions`, `fx_rates`, `price_cache`, `metadata`, `daily_portfolio_state`, `realized_trades`, `portfolio_snapshots`, `position_snapshots`, `tase_symbol_map`, `import_log`, `benchmark_cache`, `portfolio_current`. Schema in `src/database/db.py`.
 - **Position** dataclass (`src/models/position.py`): quantity, total_invested, total_invested_nis, computed average_cost.
 
 ## Critical Domain Knowledge

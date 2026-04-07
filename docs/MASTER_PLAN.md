@@ -8,13 +8,13 @@ May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction
 
 **Key drivers:**
 - Tab 1: Statistics — portfolio summary, performance metrics, top gainers/losers, currency exposure
-- Tab 2: Performance — historical returns with benchmark comparison (6 charts)
+- Tab 2: Performance — historical returns with benchmark comparison (up to 8 charts)
 - Tab 3: TASE (₪) — full-width NIS positions
 - Tab 4: US ($) — full-width USD positions
 - Tab 5: Merged portfolio (all in ₪ using historically-correct FX rates)
 - Tab 6: Options — open options positions (NIS + USD)
 - Tab 7: Cash Flow — capital allocation (invested vs free cash per currency), external flows, investment income, charts and history
-- All 22 IBI transaction types handled correctly, including stock splits and USD↔NIS forex conversions
+- All 21 IBI transaction types handled correctly, including stock splits and USD↔NIS forex conversions (forex handled as special cases of buy/sell)
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
 - User can upload new Excel files → deduplicated merge into DB
@@ -89,7 +89,7 @@ src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 
 ```
 Portfolio_Dashboard/
-├── app.py                              # Streamlit entry point (6 tabs)
+├── app.py                              # Streamlit entry point (7 tabs)
 ├── MASTER_PLAN.md                      # This file — architecture & implementation plan
 ├── README.md                           # Project overview
 ├── requirements.txt

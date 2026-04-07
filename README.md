@@ -1,6 +1,6 @@
 # IBI Portfolio Dashboard
 
-A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 6 interactive tabs with 8 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
+A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 7 interactive tabs with 8 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
 
 ---
 
@@ -43,7 +43,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 ## What
 
-### Dashboard Tabs (6)
+### Dashboard Tabs (7)
 
 | Tab | Name | Layout | Key Content |
 |-----|------|--------|-------------|
@@ -53,6 +53,7 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 | 4 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
 | 5 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
 | 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for open-only filter + interactive table |
+| 7 | **Cash Flow** | Full-width | Capital allocation (invested vs free cash per currency), external flows (deposits/withdrawals), investment income (dividends, realized P&L), charts and transaction history |
 
 ### Charts (8 Plotly Functions)
 
@@ -117,9 +118,9 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Streamlit Dashboard (app.py) — 6 tabs                       │
+│  Streamlit Dashboard (app.py) — 7 tabs                       │
 │  statistics_view, performance_view, portfolio_view,           │
-│  merged_view, options_view                                   │
+│  merged_view, options_view, cashflow_view                    │
 │  theme, styles, charts, position_table, performance_metrics  │
 ├──────────────────────────────────────────────────────────────┤
 │  Portfolio Engine                                            │
@@ -170,13 +171,14 @@ Portfolio Builder ── Sequential pass over all transactions:
 Price Fetcher ──── Fetch closing prices for open positions
     │                Primary: Twelvedata │ Fallback: yfinance
     ▼
-Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
+Streamlit Dashboard ── Render 7 tabs with metrics, tables, and charts
     Tab 1: Statistics — portfolio summary, performance, top gainers/losers
     Tab 2: Performance — historical returns vs benchmarks (up to 8 charts)
     Tab 3: TASE (₪) — NIS positions
     Tab 4: US ($) — USD positions
     Tab 5: Merged (₪) — all positions in shekels
     Tab 6: Options — open options positions
+    Tab 7: Cash Flow — capital allocation, external flows, investment income
 ```
 
 ### Key Algorithms
@@ -191,7 +193,7 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 
 **Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later. 14 symbols are affected with small shortfalls.
 
-**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (14 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (15 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
 
 **Stabilization Detection** ([performance_view.py](src/dashboard/views/performance_view.py)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there. Fallback: if no stable day found, keep all data.
 
@@ -231,6 +233,7 @@ Streamlit Dashboard ── Render 6 tabs with metrics, tables, and charts
 | Price Data (fallback) | yfinance >=0.2.66 |
 | HTTP | requests >=2.31.0 |
 | Config | python-dotenv >=1.0.0 |
+| Price Data (API client) | twelvedata |
 
 ### Color Theme
 
@@ -301,7 +304,7 @@ Open `http://localhost:8501` in your browser.
 
 ```
 Portfolio_Dashboard/
-├── app.py                          # Streamlit entry point (6 tabs)
+├── app.py                          # Streamlit entry point (7 tabs)
 ├── requirements.txt                # Python dependencies
 ├── .env                            # API keys (not in repo)
 ├── docs/                           # Project documentation
@@ -353,5 +356,6 @@ Portfolio_Dashboard/
             ├── performance_view.py # Tab 2: Up to 8 charts + benchmark comparison
             ├── portfolio_view.py   # Tabs 3-4: Single-market (TASE or US)
             ├── merged_view.py      # Tab 5: All positions in ₪
-            └── options_view.py     # Tab 6: Open options with long/short badges
+            ├── options_view.py     # Tab 6: Open options with long/short badges
+            └── cashflow_view.py    # Tab 7: Capital allocation + cash flow analysis
 ```
