@@ -178,12 +178,18 @@ prices = _get_prices(
     price_date,
 )
 
-tab_stats, tab_performance, tab_tase, tab_us, tab_merged, tab_options, tab_cashflow = st.tabs(
-    ["📊 Statistics", "📈 Performance", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options", "💰 Cash Flow"]
+tab_stats, tab_performance, tab_cashflow, tab_tase, tab_us, tab_merged, tab_options = st.tabs(
+    ["📊 Statistics", "📈 Performance", "💰 Cash Flow", "🏦 TASE (₪)", "🌐 US ($)", "🌍 Merged (₪)", "📋 Options"]
 )
 
 with tab_stats:
     statistics_view.render(portfolio, prices, price_date)
+
+with tab_performance:
+    performance_view.render()
+
+with tab_cashflow:
+    cashflow_view.render(portfolio)
 
 with tab_tase:
     portfolio_view.render(
@@ -202,9 +208,3 @@ with tab_merged:
 
 with tab_options:
     options_view.render(options_nis, options_usd)
-
-with tab_performance:
-    performance_view.render()
-
-with tab_cashflow:
-    cashflow_view.render(portfolio)
