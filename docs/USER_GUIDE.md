@@ -34,12 +34,12 @@ The IBI Portfolio Dashboard is a **Streamlit-based investment portfolio tracker*
 |---------|-------------|
 | **21 Transaction Types** | Buys, sells, dividends, splits, options, deposits, withdrawals, fees, taxes (+ forex as special cases of buy/sell) |
 | **Multi-Currency** | Dual tracking in native currency + NIS equivalent with historical FX rates |
-| **7 Dashboard Tabs** | Statistics, Performance, TASE (₪), US ($), Merged (₪), Options, Cash Flow |
-| **8 Chart Types** | Area, drawdown, bar, treemap, waterfall, pie, rolling Sharpe, monthly returns |
+| **7 Dashboard Tabs** | Statistics, Performance, Cash Flow, TASE (₪), US ($), Merged (₪), Options |
+| **7 Chart Types** | Area, drawdown, bar, treemap, pie, rolling Sharpe, monthly returns |
 | **Benchmark Comparison** | S&P 500 and TA-125 with indexed returns |
 | **Performance Metrics** | CAGR, Sharpe ratio, max drawdown, cumulative returns |
 | **Smart Caching** | Fast-load portfolio cache, price cache, FX cache, benchmark cache |
-| **104 Unit Tests** | Builders, classifiers, metrics, symbol mapper, and database CRUD |
+| **145 Unit Tests** | Builder, classifier, metrics, symbol mapper, TASE API, price fetcher, Excel reader, ingestion pipeline, and database CRUD |
 
 ### Project Structure
 
@@ -52,7 +52,7 @@ Portfolio_Dashboard/
 │   └── Transactions_IBI.xlsx        # IBI broker export (~2,065 rows)
 ├── data/
 │   └── portfolio.db                 # SQLite database (auto-created)
-├── tests/                           # 5 test files, 104 tests
+├── tests/                           # 9 test files, 145 tests
 ├── docs/                            # Documentation
 └── src/
     ├── config.py                    # Central configuration
@@ -66,6 +66,7 @@ Portfolio_Dashboard/
     │   └── ibi_classifier.py        # 21 IBI transaction types
     ├── market/
     │   ├── symbol_mapper.py         # TASE ID → ticker resolution
+    │   ├── tase_api.py              # TASE website security lookup (no API key)
     │   ├── price_fetcher.py         # Security price fetching
     │   ├── fx_fetcher.py            # USD/ILS exchange rates
     │   └── benchmark_fetcher.py     # S&P 500 & TA-125 data
@@ -79,15 +80,16 @@ Portfolio_Dashboard/
         ├── theme.py                 # Color palette & Plotly template
         ├── styles.py                # CSS + HTML helpers
         ├── components/
-        │   ├── charts.py            # 8 Plotly chart functions
+        │   ├── charts.py            # 7 Plotly chart functions
         │   ├── position_table.py    # Styled HTML position table
         │   └── performance_metrics.py  # CAGR, Sharpe, drawdown
         └── views/
             ├── statistics_view.py   # Tab 1: Summary & analytics
             ├── performance_view.py  # Tab 2: Historical performance
-            ├── portfolio_view.py    # Tabs 3–4: Single-market view
-            ├── merged_view.py       # Tab 5: All positions in ₪
-            └── options_view.py      # Tab 6: Options positions
+            ├── cashflow_view.py     # Tab 3: Capital allocation + cash flow
+            ├── portfolio_view.py    # Tabs 4–5: Single-market view
+            ├── merged_view.py       # Tab 6: All positions in ₪
+            └── options_view.py      # Tab 7: Options positions
 ```
 
 ---
@@ -345,11 +347,12 @@ Auto-detects whether TASE prices from APIs are in agorot or shekels:
 
 Converts IBI numeric ID (e.g., "445015") to API tickers.
 
-**Resolution chain (4 levels):**
-1. **Runtime cache** — in-memory dict
+**Resolution chain (5 levels):**
+1. **Runtime cache** — in-memory dict (also remembers unresolvable IDs for the session)
 2. **DB cache** — `tase_symbol_map` table
-3. **Static known map** — ~14 hardcoded entries (e.g., "445015" → "MTRX")
-4. **Twelvedata symbol_search API** — by security name
+3. **Static known map** — `_KNOWN_TASE_MAP` hardcoded entries (e.g., "445015" → "MTRX")
+4. **TASE website API** — `src/market/tase_api.py` queries `api.tase.co.il` by security ID (no API key needed)
+5. **Twelvedata symbol_search API** — by security name
 
 **Returns:** `{"td": "MTRX", "yf": "MTRX.TA", "name": "Matrix IT"}` or `None`
 
@@ -646,12 +649,6 @@ Eight Plotly chart functions:
 
 **Color scale:** Loss (red) → Neutral (white/gray) → Profit (green), centered at 0%.
 
-##### `waterfall_pnl(positions, prices, currency_symbol, fx_rate=1.0) -> Optional[go.Figure]`
-
-**What it shows:** Waterfall chart showing how individual position P&L contributions sum to total portfolio P&L.
-
-**Theory:** Waterfall charts decompose a total into its constituent parts. Bars float and connect to show cumulative effect. Sorted largest to smallest, with a "Total" bar at the end.
-
 ##### `area_chart_with_gradient(series, name, color) -> go.Figure`
 
 **What it shows:** Line chart with semi-transparent gradient fill underneath, used for portfolio value over time.
@@ -822,55 +819,7 @@ Removes leading data points with >10% day-over-day change to ensure stable basel
 - `benchmark_fetcher` for S&P 500 and TA-125
 - Prefers market value series over book value for metrics (when available)
 
-#### Tabs 3–4: Portfolio View (`portfolio_view.py`)
-
-##### `render(positions, prices, currency_symbol, cash, title) -> None`
-
-Single-market portfolio display (one for TASE ₪, one for US $).
-
-**Layout:**
-1. **Summary Metrics**: Invested, Market Value, P&L, P&L %
-2. **Cash Balance Card**
-3. **Two Charts**: Allocation Pie (left) + P&L Bar (right)
-4. **Position Table**: Full styled HTML table
-
-#### Tab 5: Merged View (`merged_view.py`)
-
-##### `render(portfolio, prices, price_date="") -> None`
-
-All positions unified in NIS. USD positions converted via FX rate.
-
-**FX Resolution:** DB lookup → current rate → fallback 3.7 with warning.
-
-**Layout:**
-1. **FX Rate Display**
-2. **Summary Metrics** (in ₪): Total Invested, Market Value, P&L, P&L %
-3. **Cash Cards**: NIS Cash, USD Cash (with ₪ conversion), Total Cash
-4. **Two Charts**: Allocation Pie + P&L Bar (TASE vs US colored)
-5. **Merged Position Table**: All positions with values in ₪
-
-#### Tab 6: Options View (`options_view.py`)
-
-##### `render(options_nis, options_usd) -> None`
-
-Options positions with direction classification.
-
-**Direction Logic:**
-- **LONG**: quantity > 0.001 *and* expiry date is today or in the future (or not parseable)
-- **SHORT**: quantity < −0.001
-- **CLOSED**: |quantity| < 0.001, *or* LONG with a past expiry date (IBI omitted the closing debit)
-
-**Controls:**
-- Toggle "Open positions only" (default: on)
-- Toggle "Interactive table" (default: off — uses HTML table)
-
-**Layout:**
-1. **Summary Metrics**: Total Positions, Long/Short count, Total Capital
-2. **Position Table**: Symbol, Name, Currency, Direction (badge), Qty, Avg Cost, Total Invested
-
----
-
-#### Tab 7: Cash Flow View (`cashflow_view.py`)
+#### Tab 3: Cash Flow View (`cashflow_view.py`)
 
 ##### `render(portfolio: dict) -> None`
 
@@ -913,6 +862,52 @@ Separated into two rows to distinguish external flows from investment income:
 
 **Section 5:** Yearly summary table (cash in, cash out, net, dividends, fees).  
 **Section 6:** Transaction detail expander (last 200 rows).
+
+#### Tabs 4–5: Portfolio View (`portfolio_view.py`)
+
+##### `render(positions, prices, currency_symbol, cash, title) -> None`
+
+Single-market portfolio display (one for TASE ₪, one for US $).
+
+**Layout:**
+1. **Summary Metrics**: Invested, Market Value, P&L, P&L %
+2. **Cash Balance Card**
+3. **Two Charts**: Allocation Pie (left) + P&L Bar (right)
+4. **Position Table**: Full styled HTML table
+
+#### Tab 6: Merged View (`merged_view.py`)
+
+##### `render(portfolio, prices, price_date="") -> None`
+
+All positions unified in NIS. USD positions converted via FX rate.
+
+**FX Resolution:** DB lookup → current rate → fallback 3.7 with warning.
+
+**Layout:**
+1. **FX Rate Display**
+2. **Summary Metrics** (in ₪): Total Invested, Market Value, P&L, P&L %
+3. **Cash Cards**: NIS Cash, USD Cash (with ₪ conversion), Total Cash
+4. **Two Charts**: Allocation Pie + P&L Bar (TASE vs US colored)
+5. **Merged Position Table**: All positions with values in ₪
+
+#### Tab 7: Options View (`options_view.py`)
+
+##### `render(options_nis, options_usd) -> None`
+
+Options positions with direction classification.
+
+**Direction Logic:**
+- **LONG**: quantity > 0.001 *and* expiry date is today or in the future (or not parseable)
+- **SHORT**: quantity < −0.001
+- **CLOSED**: |quantity| < 0.001, *or* LONG with a past expiry date (IBI omitted the closing debit)
+
+**Controls:**
+- Toggle "Open positions only" (default: on)
+- Toggle "Interactive table" (default: off — uses HTML table)
+
+**Layout:**
+1. **Summary Metrics**: Total Positions, Long/Short count, Total Capital
+2. **Position Table**: Symbol, Name, Currency, Direction (badge), Qty, Avg Cost, Total Invested
 
 ---
 
@@ -1033,15 +1028,19 @@ Each Excel row gets a SHA-256 hash. On insert, `INSERT OR IGNORE` skips rows wit
 
 ## 8. Test Suite
 
-104 tests across 5 files:
+145 tests across 9 files:
 
 | File | Tests | Coverage |
 |------|-------|----------|
 | `test_builder.py` | Portfolio build algorithm | Buy/sell/split/deposit flows, position tracking, cash balances, realized P&L, option short-sell + expiry cycle |
 | `test_classifier.py` | Transaction classification | Phantom detection, 21 types, price normalization, agorot conversion |
+| `test_excel_reader.py` | IBI Excel parsing | Hebrew header mapping, DD/MM/YYYY date parsing + ASC sort, SHA256 row hashing, numeric conversion |
+| `test_ingestion.py` | End-to-end pipeline | Fixture Excel → classify → FX backfill → dedup insert → build, realized trades, daily state, re-import dedup |
 | `test_performance_metrics.py` | Metric calculations | CAGR, max drawdown, Sharpe ratio, cumulative returns |
+| `test_price_fetcher.py` | Price normalization + guards | Agorot heuristics (`_normalize_tase`), option skip, cache short-circuit |
 | `test_repository.py` | Database CRUD | Insert, fetch, dedup, cache operations |
 | `test_symbol_mapper.py` | Symbol detection + expiry parsing | `is_option()` regex patterns, `parse_option_expiry()` for various name formats |
+| `test_tase_api.py` | TASE website API | Security lookup, symbol/name resolution, yfinance ticker conversion |
 
 **Run tests:**
 ```bash

@@ -6,3 +6,5 @@ __pycache__/
 .venv/
 .claude/
 Trans_Input/*.xlsx
+output/
+tests/verification_data/*.xlsx

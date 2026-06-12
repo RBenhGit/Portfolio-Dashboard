@@ -39,6 +39,7 @@ _KNOWN_TASE_MAP: dict[str, dict] = {
     "1081124": {"td": "ESLT",     "yf": "ESLT.TA",     "name": "Elbit Systems"},
     "1145184": {"td": "TCH.F34",  "yf": "TCH-F34.TA",  "name": "Tachlit Tel Bond Shekel ETF"},
     "1096106": {"td": "ATRY",     "yf": "ATRY.TA",     "name": "Atreyu Capital Markets"},
+    "1184381": {"td": "MPP",      "yf": "MPP.TA",      "name": "More Provident Funds"},
 }
 
 # IBI numeric IDs that are US stocks (not TASE), keyed by IBI ID.
@@ -109,7 +110,8 @@ def resolve_tase_symbol(ibi_id: str, security_name: Optional[str] = None) -> dic
     """Resolve an IBI numeric ID to Twelvedata/yfinance ticker symbols.
 
     Returns {"td": "MTRX", "yf": "MTRX.TA", "name": "Matrix IT"} or None.
-    Checks: runtime cache → DB cache → static map → Twelvedata search API.
+    Checks: runtime cache → DB cache → static map → TASE website API →
+    Twelvedata search API.
     Caches failures as _UNRESOLVABLE so repeated calls skip the API search.
     """
     ibi_id = str(ibi_id).strip()
@@ -135,11 +137,22 @@ def resolve_tase_symbol(ibi_id: str, security_name: Optional[str] = None) -> dic
         logger.info("TASE symbol %s resolved from static map → %s", ibi_id, result["td"])
         return result
 
-    # 4. Twelvedata symbol_search API (by security name)
-    if security_name and TWELVEDATA_API_KEY:
-        td_ticker = _search_twelvedata(security_name)
-        if td_ticker:
-            result = {"td": td_ticker, "yf": f"{td_ticker}.TA", "name": security_name}
+    # 4. TASE public website API — authoritative security-number → symbol source
+    from src.market import tase_api
+    hub = tase_api.lookup_security(ibi_id)
+    if hub:
+        result = {"td": hub["symbol"], "yf": _yf_from_td(hub["symbol"]), "name": hub["name"]}
+        _resolved_cache[ibi_id] = result
+        repository.upsert_tase_symbol(ibi_id, result["td"], result["yf"], result["name"])
+        logger.info("TASE symbol %s resolved via TASE API → %s", ibi_id, hub["symbol"])
+        return result
+
+    # 5. Twelvedata symbol_search API (by IBI ID, then by name)
+    if TWELVEDATA_API_KEY:
+        match = _search_twelvedata(ibi_id, security_name or "")
+        if match:
+            td_ticker, en_name = match
+            result = {"td": td_ticker, "yf": _yf_from_td(td_ticker), "name": en_name}
             _resolved_cache[ibi_id] = result
             repository.upsert_tase_symbol(ibi_id, result["td"], result["yf"], result["name"])
             logger.info("TASE symbol %s resolved via API search → %s", ibi_id, td_ticker)
@@ -179,30 +192,46 @@ def _clean_hebrew_name(name: str) -> str:
     return cleaned
 
 
-def _search_twelvedata(name: str) -> str | None:
-    """Search Twelvedata for a TASE stock by name. Returns ticker or None.
+def _yf_from_td(td: str) -> str:
+    """Convert Twelvedata ticker to yfinance .TA symbol (dots → dashes)."""
+    return td.replace(".", "-") + ".TA"
 
-    Tries the original name first, then a cleaned-up version.
+
+def _search_twelvedata_once(query: str) -> tuple[str, str] | None:
+    """Single Twelvedata symbol_search call. Returns (ticker, english_name) or None."""
+    try:
+        resp = requests.get(
+            "https://api.twelvedata.com/symbol_search",
+            params={"symbol": query, "exchange": "TASE", "apikey": TWELVEDATA_API_KEY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        for item in resp.json().get("data", []):
+            if item.get("exchange") == "TASE":
+                return item["symbol"], item.get("instrument_name", query)
+    except Exception as exc:
+        logger.warning("Twelvedata symbol search failed for '%s': %s", query, exc)
+    return None
+
+
+def _search_twelvedata(ibi_id: str, name: str) -> tuple[str, str] | None:
+    """Search Twelvedata for a TASE stock. Returns (ticker, english_name) or None.
+
+    Tries numeric IBI ID first (most specific), then the IBI name, then a
+    cleaned-up version. ID-first because Hebrew names don't match the English
+    Twelvedata index.
     """
-    candidates = [name]
-    cleaned = _clean_hebrew_name(name)
-    if cleaned != name:
-        candidates.append(cleaned)
+    candidates = [ibi_id]
+    if name:
+        candidates.append(name)
+        cleaned = _clean_hebrew_name(name)
+        if cleaned != name:
+            candidates.append(cleaned)
 
     for query in candidates:
-        try:
-            resp = requests.get(
-                "https://api.twelvedata.com/symbol_search",
-                params={"symbol": query, "exchange": "TASE", "apikey": TWELVEDATA_API_KEY},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-            for item in data:
-                if item.get("exchange") == "TASE":
-                    return item["symbol"]
-        except Exception as exc:
-            logger.warning("Twelvedata symbol search failed for '%s': %s", query, exc)
+        result = _search_twelvedata_once(query)
+        if result:
+            return result
     return None
 
 

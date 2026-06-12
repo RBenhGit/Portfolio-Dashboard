@@ -9,11 +9,11 @@ May 2022 – Dec 2025). Complete rewrite — no code copied from the Transaction
 **Key drivers:**
 - Tab 1: Statistics — portfolio summary, performance metrics, top gainers/losers, currency exposure
 - Tab 2: Performance — historical returns with benchmark comparison (up to 8 charts)
-- Tab 3: TASE (₪) — full-width NIS positions
-- Tab 4: US ($) — full-width USD positions
-- Tab 5: Merged portfolio (all in ₪ using historically-correct FX rates)
-- Tab 6: Options — open options positions (NIS + USD)
-- Tab 7: Cash Flow — capital allocation (invested vs free cash per currency), external flows, investment income, charts and history
+- Tab 3: Cash Flow — capital allocation (invested vs free cash per currency), external flows, investment income, charts and history
+- Tab 4: TASE (₪) — full-width NIS positions
+- Tab 5: US ($) — full-width USD positions
+- Tab 6: Merged portfolio (all in ₪ using historically-correct FX rates)
+- Tab 7: Options — open options positions (NIS + USD)
 - All 21 IBI transaction types handled correctly, including stock splits and USD↔NIS forex conversions (forex handled as special cases of buy/sell)
 - SQLite for persistence; only re-parse when Excel file changes
 - **Twelvedata** (paid account) as primary; yfinance as fallback
@@ -74,11 +74,11 @@ src/market/fx_fetcher.py           ← Twelvedata historical USD/ILS
 app.py → Streamlit
     Tab 1: Statistics — portfolio summary, performance, top gainers/losers
     Tab 2: Performance — historical returns vs benchmarks (up to 8 charts)
-    Tab 3: TASE (₪) — full-width NIS positions
-    Tab 4: US ($) — full-width USD positions
-    Tab 5: Merged (₪) — all positions converted to shekels
-    Tab 6: Options — open options positions
-    Tab 7: Cash Flow — capital allocation, external flows, investment income, history
+    Tab 3: Cash Flow — capital allocation, external flows, investment income, history
+    Tab 4: TASE (₪) — full-width NIS positions
+    Tab 5: US ($) — full-width USD positions
+    Tab 6: Merged (₪) — all positions converted to shekels
+    Tab 7: Options — open options positions
 
 src/market/benchmark_fetcher.py  ← yfinance S&P 500 / TA-125 with SQLite cache
 ```
@@ -99,14 +99,22 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md # Performance tab deep-dive
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf          # IBI API reference
-├── tests/                              # Test suite (104 tests)
+├── tests/                              # Test suite (145 tests)
 │   ├── test_builder.py                 # Portfolio build logic
 │   ├── test_classifier.py              # Transaction classification
+│   ├── test_excel_reader.py            # Excel parsing, date handling, row hashing
+│   ├── test_ingestion.py               # End-to-end pipeline (fixture Excel → build)
 │   ├── test_performance_metrics.py     # Metric calculations
+│   ├── test_price_fetcher.py           # Agorot normalization + cache/option guards
 │   ├── test_repository.py             # Database CRUD
-│   └── test_symbol_mapper.py           # Option detection + expiry parsing
+│   ├── test_symbol_mapper.py           # Option detection + expiry parsing
+│   └── test_tase_api.py                # TASE website API lookup
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx           # Source (read-only)
+├── config/
+│   └── initial_positions.json          # Pre-export holdings seeded into every build
+├── scripts/
+│   └── generate_presentation.py        # Screenshots all tabs → PowerPoint (dev utility)
 ├── data/
 │   └── portfolio.db                    # SQLite (auto-created)
 └── src/
@@ -129,7 +137,8 @@ Portfolio_Dashboard/
     │   ├── price_fetcher.py           # Twelvedata + yfinance fallback
     │   ├── fx_fetcher.py              # USD/ILS historical + current rates
     │   ├── benchmark_fetcher.py       # S&P 500 & TA-125 via yfinance + SQLite cache
-    │   └── symbol_mapper.py           # Market detection, TASE symbol handling
+    │   ├── symbol_mapper.py           # Market detection, TASE symbol handling
+    │   └── tase_api.py                # TASE website security lookup (no API key)
     └── dashboard/
         ├── theme.py                   # Color palette, Plotly template (ibi_dark)
         ├── styles.py                  # CSS stylesheet + HTML helpers (metric_card_html,
@@ -137,18 +146,17 @@ Portfolio_Dashboard/
         ├── views/
         │   ├── statistics_view.py     # Tab 1: Two-column layout — stats (left) + charts (right)
         │   ├── performance_view.py    # Tab 2: Up to 8 charts + benchmark comparison
-        │   ├── portfolio_view.py      # Tabs 3-4: Single-market at full width
-        │   ├── merged_view.py         # Tab 5: All positions unified in ₪
-        │   ├── options_view.py        # Tab 6: Open options with direction badges
-        │   └── cashflow_view.py       # Tab 7: Capital allocation + full cash-flow analysis
+        │   ├── cashflow_view.py       # Tab 3: Capital allocation + full cash-flow analysis
+        │   ├── portfolio_view.py      # Tabs 4-5: Single-market at full width
+        │   ├── merged_view.py         # Tab 6: All positions unified in ₪
+        │   └── options_view.py        # Tab 7: Open options with direction badges
         └── components/
             ├── position_table.py      # Reusable styled HTML position table
             ├── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
-            └── charts.py             # 8 Plotly chart functions:
+            └── charts.py             # 7 Plotly chart functions:
                                        #   allocation_pie, pnl_bar, allocation_treemap,
-                                       #   waterfall_pnl, area_chart_with_gradient,
-                                       #   drawdown_chart, monthly_returns_bar,
-                                       #   rolling_sharpe_chart
+                                       #   area_chart_with_gradient, drawdown_chart,
+                                       #   monthly_returns_bar, rolling_sharpe_chart
 ```
 
 ---
@@ -306,7 +314,8 @@ CREATE TABLE tase_symbol_map (
     ibi_id      TEXT PRIMARY KEY,    -- IBI numeric ID (e.g. "445015")
     td_symbol   TEXT,                -- Twelvedata symbol
     yf_symbol   TEXT,                -- yfinance symbol (e.g. "445015.TA")
-    name        TEXT                 -- Human-readable name (e.g. "Matrix IT")
+    name        TEXT,                -- Human-readable name (e.g. "Matrix IT")
+    updated_at  TEXT                 -- ISO datetime of last upsert
 );
 
 -- Benchmark index price cache (S&P 500, TA-125)
@@ -507,17 +516,19 @@ Cache in `price_cache` table: keyed by `(symbol, market, price_date)`. Historica
 
 ### Symbol Mapper (`src/market/symbol_mapper.py`)
 
-Market detection (in priority order):
-1. Symbol is numeric (5–8 digits) → TASE (even if denominated in $, e.g. dollar-linked bonds/ETFs)
-2. `currency == '$'` → US market
-3. `currency == '₪'` AND symbol is 1–6 uppercase letters (regex `^[A-Z]{1,6}$`) → US ETF/ADR on TASE
+Market detection — centralized in `detect_market()` (in priority order):
+1. Numeric ID listed in `_KNOWN_US_NUMERIC_IDS` → US (US stocks IBI stores under a numeric ID)
+2. Symbol is numeric (5–8 digits) → TASE (even if denominated in $, e.g. dollar-linked bonds/ETFs)
+3. `currency == '$'` → US market
 4. Default: TASE
+
+TASE symbol resolution — `resolve_tase_symbol()` chain: runtime cache → `tase_symbol_map` DB cache → `_KNOWN_TASE_MAP` static map → TASE website API (`src/market/tase_api.py`, `api.tase.co.il`, no API key needed) → Twelvedata `symbol_search` → unresolved (remembered as unresolvable for the session to avoid repeated API calls).
 
 Option detection is separate via `is_option()`: `^[89]\d{7}$` or `^ת[A-Z]\d+M\d+-\d+$` → skip pricing.
 
 ---
 
-## Dashboard Layout (Streamlit — 6 Tabs)
+## Dashboard Layout (Streamlit — 7 Tabs)
 
 ### Tab 1: Statistics — portfolio-wide analytics (two-column layout)
 
@@ -525,7 +536,7 @@ Option detection is separate via `is_option()`: `^[89]\d{7}$` or `^ת[A-Z]\d+M\d
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
 ├────────────┬─────────────┬──────────┬──────────┬────────────┬─────────────────────┤
-│ Statistics │ Performance │ TASE (₪) │  US ($)  │ Merged (₪) │ Options             │
+│ Statistics │ Performance │ Cash Flow │ TASE (₪) │ US ($) │ Merged (₪) │ Options   │
 ├────────────┴─────────────┴──────────┴──────────┴────────────┴─────────────────────┤
 │  LEFT COLUMN (1/3 width)            │  RIGHT COLUMN (2/3 width)                    │
 │  ┌── Portfolio Summary ──────────┐  │  ┌── Portfolio Composition ────────────────┐ │
@@ -591,13 +602,36 @@ Rendered via `performance_view.render()` (no parameters). Key design decisions:
 - **Valuation method** — performance metrics (Total Return, CAGR, Sharpe, Drawdown) use **market value** (mark-to-market) when available, falling back to book value (cost basis + realized P&L); "Invested Capital" charts use book value
 - **Metrics** — CAGR uses 365.25 days/year; Sharpe uses 3-month US T-bill rate (`^IRX`, cached daily via yfinance; falls back to 4%), 252 trading days, min 30 data points
 
-### Tab 3: TASE (₪) — full-width NIS positions
+### Tab 3: Cash Flow — capital allocation and transaction history
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│  Capital Allocation                                                        │
+│  Free Cash (NIS) | Free Cash (USD) | Total Free Cash (₪ equiv.)           │
+│  Invested (NIS)  | Invested (USD)  | Total Invested  (₪ equiv.)           │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Cash Flow Summary                                                         │
+│  Deposits | Withdrawals | Net External Flow                                │
+│  Dividends | Fees & Taxes | Net Investment Income                          │
+├────────────────────────────────────────────────────────────────────────────┤
+│  [Cumulative Cash Flow Over Time — line chart]                             │
+│  [Monthly Cash Flow — bar + line chart]                                    │
+│  [Net Flow by Category — horizontal bar] | [Inflow Composition — pie]     │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Yearly Summary Table                                                      │
+│  [Transaction Details — expander, last 200 rows]                          │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+Rendered via `cashflow_view.render(portfolio)`. Receives the full portfolio dict so the Capital Allocation section can read live `nis_cash`, `usd_cash`, and position totals. Categories use `_EFFECT_TO_CATEGORY` map: stock purchases/sales labeled separately from external transfers; both `forex_buy` and `forex_sell` map to "Forex Conversion".
+
+### Tab 4: TASE (₪) — full-width NIS positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │  IBI Portfolio Dashboard        [Prices as of: YYYY-MM-DD]           [▶ sidebar]  │
 ├────────────┬─────────────┬──────────┬──────────┬────────────┬─────────────────────┤
-│ Statistics │ Performance │ TASE (₪) │  US ($)  │ Merged (₪) │ Options             │
+│ Statistics │ Performance │ Cash Flow │ TASE (₪) │ US ($) │ Merged (₪) │ Options   │
 ├────────────┴─────────────┴──────────┴──────────┴────────────┴─────────────────────┤
 │  ┌──── TASE Account (₪) ─────────────────────────────────────────────────┐│
 │  │ [Invested] [Market] [P&L] [P&L%]                                     ││
@@ -610,7 +644,7 @@ Rendered via `performance_view.render()` (no parameters). Key design decisions:
 
 Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, title)` — called once per market tab, each at full width. Layout: 4 metric cards → cash card → charts (donut 1/3, P&L bar 2/3) → position table.
 
-### Tab 4: US ($) — full-width USD positions
+### Tab 5: US ($) — full-width USD positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -623,7 +657,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Tab 5: Merged Portfolio (all in ₪)
+### Tab 6: Merged Portfolio (all in ₪)
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -650,7 +684,7 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 - `USD position value (₪)` = `quantity × price_usd × fx_rate_on_reference_date`
 - `USD cash (₪)` = `usd_cash × fx_rate_on_reference_date`
 
-### Tab 6: Options — open options positions
+### Tab 7: Options — open options positions
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -668,30 +702,6 @@ Rendered via `portfolio_view.render(positions, prices, currency_symbol, cash, ti
 ```
 
 Rendered via `options_view.render(options_nis, options_usd)`. NIS and USD options are merged into a single table with a Currency column. Options positions are separated from stock positions during the builder pass using `symbol_mapper.is_option()`.
-
-
-### Tab 7: Cash Flow — capital allocation and transaction history
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│  Capital Allocation                                                        │
-│  Free Cash (NIS) | Free Cash (USD) | Total Free Cash (₪ equiv.)           │
-│  Invested (NIS)  | Invested (USD)  | Total Invested  (₪ equiv.)           │
-├────────────────────────────────────────────────────────────────────────────┤
-│  Cash Flow Summary                                                         │
-│  Deposits | Withdrawals | Net External Flow                                │
-│  Dividends | Fees & Taxes | Net Investment Income                          │
-├────────────────────────────────────────────────────────────────────────────┤
-│  [Cumulative Cash Flow Over Time — line chart]                             │
-│  [Monthly Cash Flow — bar + line chart]                                    │
-│  [Net Flow by Category — horizontal bar] | [Inflow Composition — pie]     │
-├────────────────────────────────────────────────────────────────────────────┤
-│  Yearly Summary Table                                                      │
-│  [Transaction Details — expander, last 200 rows]                          │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-Rendered via `cashflow_view.render(portfolio)`. Receives the full portfolio dict so the Capital Allocation section can read live `nis_cash`, `usd_cash`, and position totals. Categories use `_EFFECT_TO_CATEGORY` map: stock purchases/sales labeled separately from external transfers; both `forex_buy` and `forex_sell` map to "Forex Conversion".
 
 
 ### Sidebar
@@ -836,13 +846,13 @@ yfinance>=0.2.66
 11. ✅ **Price fetcher** — `src/market/price_fetcher.py` (Twelvedata + yfinance + TASE agorot verification)
 12. ✅ **Snapshot writer** — `repository.save_snapshot()` (called after each import/refresh)
 13. ✅ **Components** — `position_table.py` (with cash row), `charts.py`, `performance_metrics.py`
-14. ✅ **Views** — `portfolio_view.py` (Tab 3: TASE, Tab 4: US), `merged_view.py` (Tab 5)
-15. ✅ **Options tab** — `options_view.py` (Tab 6: open options positions)
+14. ✅ **Views** — `portfolio_view.py` (Tab 4: TASE, Tab 5: US), `merged_view.py` (Tab 6)
+15. ✅ **Options tab** — `options_view.py` (Tab 7: open options positions)
 16. ✅ **Performance tab** — `performance_view.py` (Tab 2: historical returns + benchmarks), `benchmark_fetcher.py`
 17. ✅ **App entry point** — `app.py` (7 tabs + sidebar uploader)
 18. ✅ **Statistics tab** — `statistics_view.py` (Tab 1: portfolio summary, performance metrics, trading activity, risk & diversification)
 19. ✅ **הטבה inspection** — query the 7 rows from DB; confirm split vs bonus; adjust classifier
-20. ✅ **Cash Flow tab** — `cashflow_view.py` (Tab 7: Capital Allocation section + full cash-flow analysis with corrected categories)
+20. ✅ **Cash Flow tab** — `cashflow_view.py` (Tab 3, moved next to Performance: Capital Allocation section + full cash-flow analysis with corrected categories)
 21. ✅ **forex_sell bug fix** — `ibi_classifier.py`: `מכירה שח` on symbol 99028 ("S USD/ILS") was classified as `effect=none` (phantom guard blocked it). Added explicit `sym == "99028"` branch that sets `effect="forex_sell"`, `cash_flow_usd=-abs(qty)`, `cash_flow_nis=amount_lc`. Patched 10 existing DB rows. USD cash discrepancy reduced from ~$35,897 to ~$55 (rounding).
 
 ---
@@ -881,16 +891,21 @@ streamlit run app.py
 [x] Historical data only — no forward-looking projections
 [x] Benchmark data cached in benchmark_cache table
 
-# Tab 3 — TASE (₪)
+# Tab 3 — Cash Flow
+[x] Capital Allocation: free cash vs invested per currency + ₪ totals
+[x] Cash Flow Summary: deposits, withdrawals, dividends, fees & taxes
+[x] Cumulative + monthly cash flow charts, category breakdown, yearly table
+
+# Tab 4 — TASE (₪)
 [x] Full-width NIS positions with cash card visible
 [x] Donut pie chart + P&L horizontal bar chart
 [x] NIS cash ≈ last 'balance' value in original Excel (יתרה שקלית column)
 
-# Tab 4 — US ($)
+# Tab 5 — US ($)
 [x] Full-width USD positions with cash card visible
 [x] Donut pie chart + P&L horizontal bar chart
 
-# Tab 5 — Merged (₪)
+# Tab 6 — Merged (₪)
 [x] All positions shown in ₪
 [x] USD position cost uses historical FX rate (not today's rate)
 [x] USD position value uses FX rate on reference date
@@ -898,7 +913,7 @@ streamlit run app.py
 [x] Historical USD/ILS rate for reference date shown
 [x] Donut pie chart + P&L bar chart colored by market
 
-# Tab 6 — Options
+# Tab 7 — Options
 [x] NIS and USD options merged into single table with Currency column
 [x] Direction badges (LONG/SHORT/CLOSED)
 [x] Toggle: open positions only

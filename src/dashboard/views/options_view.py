@@ -26,7 +26,16 @@ def render(options_nis: dict, options_usd: dict) -> None:
     open_only = st.toggle("Open positions only", value=True)
 
     if open_only:
-        all_positions = [p for p in all_positions if abs(p.quantity) > _QTY_EPS]
+        today = _date.today()
+        all_positions = [
+            p for p in all_positions
+            if abs(p.quantity) > _QTY_EPS
+            and not (
+                p.quantity > 0
+                and (exp := parse_option_expiry(p.security_name))
+                and exp < today
+            )
+        ]
 
     if not all_positions:
         st.info("No open option positions.")

@@ -22,7 +22,9 @@ class Position:
 
     @property
     def average_cost(self) -> float:
-        return self.total_invested / self.quantity if self.quantity > 0 else 0.0
+        if abs(self.quantity) < 1e-9:
+            return 0.0
+        return self.total_invested / self.quantity
 
     def to_snapshot_dict(self) -> dict:
         return {

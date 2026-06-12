@@ -172,50 +172,6 @@ def allocation_treemap(
     return fig
 
 
-def waterfall_pnl(
-    positions: dict,
-    prices: dict,
-    currency_symbol: str,
-    fx_rate: float = 1.0,
-) -> Optional[go.Figure]:
-    """Waterfall chart showing P&L contribution per position.
-
-    When *fx_rate* != 1.0, non-TASE (USD) positions are converted to NIS.
-    """
-    items = []
-    for sym, pos in positions.items():
-        price = prices.get(sym)
-        if price is not None and pos.average_cost > 0:
-            multiplier = fx_rate if getattr(pos, "market", "") != "TASE" else 1.0
-            pnl = (price - pos.average_cost) * pos.quantity * multiplier
-            items.append((_display_label(sym, pos), pnl))
-
-    if not items:
-        return None
-
-    items.sort(key=lambda x: x[1], reverse=True)
-    names = [i[0] for i in items] + ["Total"]
-    pnls = [i[1] for i in items] + [sum(i[1] for i in items)]
-    measures = ["relative"] * len(items) + ["total"]
-
-    fig = go.Figure(go.Waterfall(
-        x=names, y=pnls, measure=measures,
-        increasing=dict(marker_color=theme.PROFIT),
-        decreasing=dict(marker_color=theme.LOSS),
-        totals=dict(marker_color=theme.ACCENT_SECONDARY),
-        connector=dict(line=dict(color=theme.BORDER_SUBTLE)),
-        textposition="outside",
-        text=[f"{currency_symbol}{v:+,.0f}" for v in pnls],
-    ))
-    fig.update_layout(
-        title="P&L Breakdown (Waterfall)",
-        height=400,
-        margin=dict(t=50, b=80),
-        xaxis_tickangle=-45,
-    )
-    return fig
-
-
 def area_chart_with_gradient(
     series: pd.Series,
     name: str = "Portfolio Value",

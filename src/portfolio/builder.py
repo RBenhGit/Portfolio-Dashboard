@@ -218,7 +218,43 @@ def build(trigger: str = "startup") -> dict:
 
         if direction == "add":
             # BUY / DEPOSIT / BONUS / SPLIT-ADD
-            if effect == "option_expiry" and pos.quantity > -_EPS:
+            if effect == "option_expiry" and pos.quantity < -_EPS:
+                # ── Short option expiring — close position, realize premium ──
+                close_qty = min(qty_abs, abs(pos.quantity))
+                avg = abs(pos.average_cost)  # premium per unit received
+                realized = close_qty * avg   # full premium kept as profit
+                repository.insert_realized_trade({
+                    "date":            date,
+                    "security_symbol": sym,
+                    "security_name":   name,
+                    "market":          mkt,
+                    "currency":        currency,
+                    "quantity_sold":   close_qty,
+                    "avg_cost":        avg,
+                    "sale_price":      0.0,
+                    "cost_total":      close_qty * avg,
+                    "proceeds":        0.0,
+                    "realized_pnl":    realized,
+                    "realized_pnl_pct": 100.0,
+                })
+                if currency == "₪":
+                    cum_realized_pnl_nis += realized
+                else:
+                    cum_realized_pnl_usd += realized
+                pos.quantity += close_qty
+                # Scale down invested proportionally
+                if abs(pos.quantity) < _EPS:
+                    pos.total_invested = 0.0
+                    pos.total_invested_nis = 0.0
+                else:
+                    factor = close_qty / (close_qty + abs(pos.quantity))
+                    pos.total_invested *= (1 - factor)
+                    pos.total_invested_nis *= (1 - factor)
+                logger.info(
+                    "Short option expired %s: closed %.0f at premium=%.2f, "
+                    "realized=%.2f on %s", sym, close_qty, avg, realized, date,
+                )
+            elif effect == "option_expiry" and pos.quantity > -_EPS:
                 # Expiry credit for an option whose original sell is not in our
                 # data (sold before the reporting period).  Skip to avoid
                 # creating a phantom LONG position.
@@ -228,14 +264,60 @@ def build(trigger: str = "startup") -> dict:
                 )
                 continue
             elif effect == "stock_split":
-                # Split: ratio = new_qty / current_qty → revalue avg_cost
-                if pos.quantity > _EPS:
-                    ratio = (pos.quantity + qty_abs) / pos.quantity
+                # Split / contract adjustment: scale position proportionally.
+                # Works for both long (positive qty) and short (negative qty).
+                if abs(pos.quantity) > _EPS:
+                    ratio = (abs(pos.quantity) + qty_abs) / abs(pos.quantity)
                     pos.quantity = pos.quantity * ratio
-                    # total_invested unchanged; avg_cost drops automatically
-                    # avg_cost is computed as total_invested / quantity
+                    # total_invested unchanged; avg_cost adjusts automatically
                 else:
                     pos.quantity += qty_abs
+            elif is_option(sym, name) and pos.quantity < -_EPS:
+                # ── Buy-to-close a short option ─────────────────────────
+                close_qty = min(qty_abs, abs(pos.quantity))
+                avg = abs(pos.average_cost)   # premium received per unit
+                buy_price = exec_p            # price paid to close
+                realized = close_qty * (avg - buy_price)
+                repository.insert_realized_trade({
+                    "date":            date,
+                    "security_symbol": sym,
+                    "security_name":   name,
+                    "market":          mkt,
+                    "currency":        currency,
+                    "quantity_sold":   close_qty,
+                    "avg_cost":        avg,
+                    "sale_price":      buy_price,
+                    "cost_total":      close_qty * avg,
+                    "proceeds":        close_qty * buy_price,
+                    "realized_pnl":    realized,
+                    "realized_pnl_pct": (
+                        realized / (close_qty * avg) * 100
+                        if avg > 0 else 0.0
+                    ),
+                })
+                if currency == "₪":
+                    cum_realized_pnl_nis += realized
+                else:
+                    cum_realized_pnl_usd += realized
+                pos.quantity += close_qty
+                if abs(pos.quantity) < _EPS:
+                    pos.total_invested = 0.0
+                    pos.total_invested_nis = 0.0
+                else:
+                    factor = close_qty / (close_qty + abs(pos.quantity))
+                    pos.total_invested *= (1 - factor)
+                    pos.total_invested_nis *= (1 - factor)
+                # If buy qty exceeds short, remainder opens a long position
+                remainder = qty_abs - close_qty
+                if remainder > _EPS:
+                    pos.quantity += remainder
+                    pos.total_invested += remainder * exec_p
+                    pos.total_invested_nis += remainder * exec_p
+                logger.info(
+                    "Buy-to-close option %s: closed %.0f at %.2f "
+                    "(avg_premium=%.2f), realized=%.2f on %s",
+                    sym, close_qty, buy_price, avg, realized, date,
+                )
             else:
                 pos.quantity += qty_abs
                 pos.total_invested += cost_b
@@ -243,55 +325,95 @@ def build(trigger: str = "startup") -> dict:
 
         elif direction == "remove":
             # SELL / WITHDRAWAL
-            if pos.quantity < qty_abs - _EPS:
-                if is_option(sym, name):
-                    # Options can be sold short (written) — allow negative position
-                    logger.debug(
-                        "Option short sell %s: have %.4f, selling %.4f on %s",
-                        sym, pos.quantity, qty_abs, date
-                    )
-                else:
+            # For options, distinguish sell-to-close (has long qty) from
+            # write / sell-to-open (goes short = negative qty).
+            if is_option(sym, name) and pos.quantity < qty_abs - _EPS:
+                # ── Option write (sell-to-open), possibly partially closing ──
+                close_qty = max(0.0, pos.quantity)  # long portion to close
+                write_qty = qty_abs - close_qty      # new short portion
+
+                # Close the long portion (if any) — record realized P&L
+                if close_qty > _EPS:
+                    avg = pos.average_cost
+                    realized = close_qty * (exec_p - avg)
+                    repository.insert_realized_trade({
+                        "date":            date,
+                        "security_symbol": sym,
+                        "security_name":   name,
+                        "market":          mkt,
+                        "currency":        currency,
+                        "quantity_sold":   close_qty,
+                        "avg_cost":        avg,
+                        "sale_price":      exec_p,
+                        "cost_total":      close_qty * avg,
+                        "proceeds":        close_qty * exec_p,
+                        "realized_pnl":    realized,
+                        "realized_pnl_pct": (
+                            realized / (close_qty * avg) * 100
+                            if avg > 0 else 0.0
+                        ),
+                    })
+                    if currency == "₪":
+                        cum_realized_pnl_nis += realized
+                    else:
+                        cum_realized_pnl_usd += realized
+                    # Zero out the long portion
+                    pos.quantity = 0.0
+                    pos.total_invested = 0.0
+                    pos.total_invested_nis = 0.0
+
+                # Write the short portion — track premium, NO realized trade
+                logger.debug(
+                    "Option write %s: qty=%.4f at premium=%.4f on %s",
+                    sym, write_qty, exec_p, date,
+                )
+                pos.quantity -= write_qty
+                # Premium received stored as negative invested (obligation)
+                pos.total_invested -= write_qty * exec_p
+                pos.total_invested_nis -= write_qty * exec_p
+            else:
+                # ── Normal sell / sell-to-close ──────────────────────────
+                if pos.quantity < qty_abs - _EPS and not is_option(sym, name):
                     # Pre-transfer position: shares bought before data starts
                     shortfall = qty_abs - pos.quantity
                     logger.info(
-                        "Pre-transfer adjustment for %s: adding %.4f phantom shares "
-                        "(have %.4f, need %.4f on %s)",
-                        sym, shortfall, pos.quantity, qty_abs, date
+                        "Pre-transfer adjustment for %s: adding %.4f phantom "
+                        "shares (have %.4f, need %.4f on %s)",
+                        sym, shortfall, pos.quantity, qty_abs, date,
                     )
-                    pos.quantity += shortfall  # fill gap so sell proceeds normally
+                    pos.quantity += shortfall
 
-            realized = qty_abs * (exec_p - pos.average_cost)
-            repository.insert_realized_trade({
-                "date":            date,
-                "security_symbol": sym,
-                "security_name":   name,
-                "market":          mkt,
-                "currency":        currency,
-                "quantity_sold":   qty_abs,
-                "avg_cost":        pos.average_cost,
-                "sale_price":      exec_p,
-                "cost_total":      qty_abs * pos.average_cost,
-                "proceeds":        qty_abs * exec_p,
-                "realized_pnl":    realized,
-                "realized_pnl_pct": (
-                    realized / (qty_abs * pos.average_cost) * 100
-                    if pos.average_cost > 0 else 0.0
-                ),
-            })
+                realized = qty_abs * (exec_p - pos.average_cost)
+                repository.insert_realized_trade({
+                    "date":            date,
+                    "security_symbol": sym,
+                    "security_name":   name,
+                    "market":          mkt,
+                    "currency":        currency,
+                    "quantity_sold":   qty_abs,
+                    "avg_cost":        pos.average_cost,
+                    "sale_price":      exec_p,
+                    "cost_total":      qty_abs * pos.average_cost,
+                    "proceeds":        qty_abs * exec_p,
+                    "realized_pnl":    realized,
+                    "realized_pnl_pct": (
+                        realized / (qty_abs * pos.average_cost) * 100
+                        if pos.average_cost > 0 else 0.0
+                    ),
+                })
 
-            if currency == "₪":
-                cum_realized_pnl_nis += realized
-            else:
-                cum_realized_pnl_usd += realized
+                if currency == "₪":
+                    cum_realized_pnl_nis += realized
+                else:
+                    cum_realized_pnl_usd += realized
 
-            reduce_factor = qty_abs / pos.quantity if pos.quantity > 0 else 1.0
-            pos.quantity          -= qty_abs
-            pos.total_invested    *= (1 - reduce_factor)
-            pos.total_invested_nis *= (1 - reduce_factor)
+                reduce_factor = qty_abs / pos.quantity if pos.quantity > 0 else 1.0
+                pos.quantity          -= qty_abs
+                pos.total_invested    *= (1 - reduce_factor)
+                pos.total_invested_nis *= (1 - reduce_factor)
 
-            # Options can go negative (short positions) — only delete non-options
-            if pos.quantity < _EPS and not is_option(sym, name):
-                del positions[sym]
+                if abs(pos.quantity) < _EPS and not is_option(sym, name):
+                    del positions[sym]
 
     # Record final date
     if current_date:

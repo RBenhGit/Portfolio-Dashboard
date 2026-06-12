@@ -1,6 +1,6 @@
 # IBI Portfolio Dashboard
 
-A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 7 interactive tabs with 8 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
+A Streamlit-based investment portfolio dashboard that reconstructs and tracks a multi-market portfolio from IBI broker (Israel) transaction exports. It processes 2,000+ raw Hebrew-labeled transactions, handles 21 transaction types with IBI-specific quirks (agorot pricing, phantom entries, option expiry reordering), and delivers 7 interactive tabs with 7 chart types, multi-currency accounting, and benchmark comparison against S&P 500 and TA-125.
 
 ---
 
@@ -49,20 +49,19 @@ Israeli investors using **IBI** (a leading Israeli brokerage) face a significant
 |-----|------|--------|-------------|
 | 1 | **Statistics** | Two-column (1/3 stats, 2/3 charts) | Portfolio summary (6 metric cards + 3 position counts), performance metrics table (vs benchmarks), top 5 gainers/losers, currency exposure, treemap composition, P&L breakdown bar |
 | 2 | **Performance** | Full-width, up to 8 charts | Total Return, CAGR, Max Drawdown, Sharpe Ratio metric cards; benchmark captions; invested capital area, drawdown, invested capital vs benchmarks, cumulative returns vs benchmarks (market value), US vs TASE splits (invested capital + cumulative returns), monthly returns bar, rolling Sharpe |
-| 3 | **TASE (₪)** | Full-width | NIS positions with cash card, donut pie allocation, P&L bar chart, styled position table |
-| 4 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
-| 5 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
-| 6 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for open-only filter + interactive table |
-| 7 | **Cash Flow** | Full-width | Capital allocation (invested vs free cash per currency), external flows (deposits/withdrawals), investment income (dividends, realized P&L), charts and transaction history |
+| 3 | **Cash Flow** | Full-width | Capital allocation (invested vs free cash per currency), external flows (deposits/withdrawals), investment income (dividends, realized P&L), charts and transaction history |
+| 4 | **TASE (₪)** | Full-width | NIS positions with cash card, donut pie allocation, P&L bar chart, styled position table |
+| 5 | **US ($)** | Full-width | USD positions with cash card, donut pie allocation, P&L bar chart, styled position table |
+| 6 | **Merged (₪)** | Full-width | All positions in shekels (FX-converted), 3 cash cards (NIS, USD, total), unified pie + P&L bar, position table colored by market |
+| 7 | **Options** | Full-width | Open/closed options with direction badges (LONG/SHORT/CLOSED), summary metrics, toggle for open-only filter + interactive table |
 
-### Charts (8 Plotly Functions)
+### Charts (7 Plotly Functions)
 
 | Chart | Function | Height | Description |
 |-------|----------|--------|-------------|
 | Allocation Donut Pie | `allocation_pie()` | 380px | Market value allocation with 35% hole, percent+label inside |
-| P&L Horizontal Bar | `pnl_bar()` | auto | Color-coded gain/loss bars with currency labels |
+| P&L Horizontal Bar | `pnl_bar()` | dynamic (≥300px, scales with position count) | Color-coded gain/loss bars with currency labels |
 | Portfolio Treemap | `allocation_treemap()` | 450px | Hierarchical allocation colored by P&L %, multi-currency |
-| P&L Waterfall | `waterfall_pnl()` | 400px | Cumulative P&L with running total |
 | Area with Gradient | `area_chart_with_gradient()` | 420px | Portfolio value over time with gradient fill |
 | Drawdown Underwater | `drawdown_chart()` | 250px | Red underwater plot showing peak-to-trough decline |
 | Monthly Returns Bar | `monthly_returns_bar()` | 350px | Monthly returns with color-coded gain/loss bars |
@@ -174,11 +173,11 @@ Price Fetcher ──── Fetch closing prices for open positions
 Streamlit Dashboard ── Render 7 tabs with metrics, tables, and charts
     Tab 1: Statistics — portfolio summary, performance, top gainers/losers
     Tab 2: Performance — historical returns vs benchmarks (up to 8 charts)
-    Tab 3: TASE (₪) — NIS positions
-    Tab 4: US ($) — USD positions
-    Tab 5: Merged (₪) — all positions in shekels
-    Tab 6: Options — open options positions
-    Tab 7: Cash Flow — capital allocation, external flows, investment income
+    Tab 3: Cash Flow — capital allocation, external flows, investment income
+    Tab 4: TASE (₪) — NIS positions
+    Tab 5: US ($) — USD positions
+    Tab 6: Merged (₪) — all positions in shekels
+    Tab 7: Options — open options positions
 ```
 
 ### Key Algorithms
@@ -191,9 +190,9 @@ Streamlit Dashboard ── Render 7 tabs with metrics, tables, and charts
 
 **Past-Expiry LONG Detection** ([symbol_mapper.py](src/market/symbol_mapper.py), [options_view.py](src/dashboard/views/options_view.py)) — When IBI omits the closing `משיכה פקיעה` for a long option, the builder cannot close the position. `parse_option_expiry()` extracts the expiry date from the option name (e.g. `תP001560M407-35` → July 2024) using the embedded `M[Y][MM]` token. The Options tab uses this at render time to override past-expiry LONG positions to CLOSED.
 
-**Pre-Transfer Phantom Shares** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later. 14 symbols are affected with small shortfalls.
+**Pre-Transfer Phantom Shares & Initial Positions** — When a sell exceeds available quantity for a non-option position, the builder auto-fills the shortfall at cost basis ₪0. This handles shares that were bought before the IBI data begins and transferred in later. Known pre-export holdings with a real cost basis are instead seeded from `config/initial_positions.json` at the start of each build (NIS cost basis converted to USD via the FX rate near the earliest transaction date); the ₪0 phantom fill covers only the remaining small shortfalls.
 
-**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (15 known stocks) → Twelvedata `symbol_search` API → fallback to None. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the API search to improve match accuracy.
+**TASE Symbol Resolution** ([symbol_mapper.py](src/market/symbol_mapper.py), [tase_api.py](src/market/tase_api.py)) — IBI uses 5-8 digit numeric IDs for TASE stocks. Resolution chain: runtime cache → DB cache → static map (`_KNOWN_TASE_MAP`) → TASE website API (`api.tase.co.il`, no API key needed) → Twelvedata `symbol_search` API → fallback to None. Unresolvable IDs are remembered in the runtime cache to avoid repeated API calls. IBI abbreviates Hebrew fund names (e.g. "תכ." for "תכלית"), so a `_HEBREW_ABBREVS` lookup expands these before the Twelvedata search to improve match accuracy.
 
 **Stabilization Detection** ([performance_view.py](src/dashboard/views/performance_view.py)) — Auto-trims the initial account build-up period where bulk imports create >10% daily swings. Uses `pct_change().abs() <= 0.10` to find the first stable day and slices the series from there. Fallback: if no stable day found, keep all data.
 
@@ -274,6 +273,8 @@ TWELVEDATA_API_KEY=your_api_key_here    # Sign up at twelvedata.com (free tier: 
 YFINANCE_ENABLED=true                    # Free fallback, no API key needed
 ```
 
+Optionally, holdings acquired before the first IBI export can be declared in `config/initial_positions.json` (symbol, quantity, NIS cost basis); the builder seeds them at the start of every build.
+
 ### Input Data
 
 Place your IBI Excel export at:
@@ -312,14 +313,22 @@ Portfolio_Dashboard/
 │   ├── performance-tab-why-how-what.md
 │   ├── Insufficient_Shares_Investigation_2026-02-20.md
 │   └── 2000_api_guide_eng.pdf      # IBI API reference
-├── tests/                          # Test suite (104 tests)
+├── tests/                          # Test suite (145 tests)
 │   ├── test_builder.py             # Portfolio build logic tests
 │   ├── test_classifier.py          # Transaction classification tests
+│   ├── test_excel_reader.py        # Excel parsing, date handling, row hashing tests
+│   ├── test_ingestion.py           # End-to-end pipeline test (fixture Excel → build)
 │   ├── test_performance_metrics.py # Metric calculation tests
+│   ├── test_price_fetcher.py       # Agorot normalization + cache/option guard tests
 │   ├── test_repository.py          # Database CRUD tests
-│   └── test_symbol_mapper.py       # Option detection + expiry parsing tests
+│   ├── test_symbol_mapper.py       # Option detection + expiry parsing tests
+│   └── test_tase_api.py            # TASE website API lookup tests
 ├── Trans_Input/
 │   └── Transactions_IBI.xlsx       # IBI broker export
+├── config/
+│   └── initial_positions.json      # Pre-export holdings seeded into every build
+├── scripts/
+│   └── generate_presentation.py    # Screenshots all tabs → PowerPoint (dev utility)
 ├── data/
 │   └── portfolio.db                # SQLite database (auto-created)
 └── src/
@@ -334,6 +343,7 @@ Portfolio_Dashboard/
     │   └── ibi_classifier.py       # 21 IBI transaction type classifier
     ├── market/
     │   ├── symbol_mapper.py        # TASE ID → ticker resolution + Hebrew abbrev expansion
+    │   ├── tase_api.py             # TASE website security lookup (no API key)
     │   ├── price_fetcher.py        # Market price fetching (Twelvedata + yfinance fallback)
     │   ├── fx_fetcher.py           # USD/ILS historical rate fetching
     │   └── benchmark_fetcher.py    # S&P 500 & TA-125 via yfinance + cache + risk-free rate
@@ -347,15 +357,15 @@ Portfolio_Dashboard/
         ├── theme.py                # Color palette, Plotly template (ibi_dark)
         ├── styles.py               # CSS stylesheet + HTML helpers (metric_card_html, html_table)
         ├── components/
-        │   ├── charts.py           # 8 Plotly chart functions (pie, bar, treemap, waterfall,
+        │   ├── charts.py           # 7 Plotly chart functions (pie, bar, treemap,
         │   │                       #   area, drawdown, monthly bar, rolling Sharpe)
         │   ├── position_table.py   # Styled HTML position table
         │   └── performance_metrics.py # CAGR, Sharpe, max drawdown, cumulative returns
         └── views/
             ├── statistics_view.py  # Tab 1: Two-column layout — stats + charts
             ├── performance_view.py # Tab 2: Up to 8 charts + benchmark comparison
-            ├── portfolio_view.py   # Tabs 3-4: Single-market (TASE or US)
-            ├── merged_view.py      # Tab 5: All positions in ₪
-            ├── options_view.py     # Tab 6: Open options with long/short badges
-            └── cashflow_view.py    # Tab 7: Capital allocation + cash flow analysis
+            ├── cashflow_view.py    # Tab 3: Capital allocation + cash flow analysis
+            ├── portfolio_view.py   # Tabs 4-5: Single-market (TASE or US)
+            ├── merged_view.py      # Tab 6: All positions in ₪
+            └── options_view.py     # Tab 7: Open options with long/short badges
 ```
