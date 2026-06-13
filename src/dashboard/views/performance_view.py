@@ -21,6 +21,10 @@ from src.dashboard.components.charts import (
 )
 
 
+# Positions before this date were transferred from another account without cost basis.
+PERFORMANCE_START_DATE = "2022-05-08"
+
+
 def _stable_start_filter(series: pd.Series) -> pd.Series:
     """Drop leading data points where day-over-day change exceeds 10%."""
     series = series[series > 0]
@@ -42,6 +46,12 @@ def render() -> None:
     states = repository.get_daily_portfolio_states()
     if not states:
         st.info("No daily portfolio data yet. Import transactions first.")
+        return
+
+    # Drop pre-migration rows — cost basis before this date is from a different account.
+    states = [row for row in states if row["date"] >= PERFORMANCE_START_DATE]
+    if not states:
+        st.info("No data from 2022-05-08 onward.")
         return
 
     dates, values = [], []
