@@ -14,7 +14,7 @@ import requests
 
 import re
 
-from src.config import TWELVEDATA_API_KEY, YFINANCE_ENABLED
+from src.config import TWELVEDATA_API_KEY, YFINANCE_ENABLED, redact
 from src.database import repository
 from src.market.symbol_mapper import (
     is_option, resolve_tase_symbol, resolve_us_numeric_ticker,
@@ -83,7 +83,7 @@ def _fetch_historical(symbol: str, market: str,
                 return p
         except Exception as exc:
             logger.warning("Twelvedata historical price failed for %s on %s: %s",
-                           symbol, price_date, exc)
+                           symbol, price_date, redact(exc))
 
     if YFINANCE_ENABLED:
         try:
@@ -93,23 +93,58 @@ def _fetch_historical(symbol: str, market: str,
                 return p
         except Exception as exc:
             logger.warning("yfinance historical price failed for %s on %s: %s",
-                           symbol, price_date, exc)
+                           symbol, price_date, redact(exc))
 
     logger.error("All price sources failed for %s (market=%s, date=%s)",
                  symbol, market, price_date)
     return None
 
 
+# Days of lookback for the Twelvedata window. Must span the longest run of
+# consecutive non-trading days: a weekend plus a multi-day TASE holiday
+# (e.g. Rosh Hashanah, Passover) can close the market for the better part of
+# a week, and the window has to reach back past it to find a real close.
+_TD_WINDOW_DAYS = 10
+
+
+def _td_window(price_date: str) -> tuple:
+    """(start_date, end_date) for a Twelvedata query covering price_date.
+
+    end_date is EXCLUSIVE, so it is price_date + 1 day -- verified against
+    the API: end_date=2026-08-05 returns rows up to 08-04 only, while
+    end_date=2026-08-06 includes 08-05. Without the +1 every lookup silently
+    returned the *previous* trading day's close (e.g. MSFT 492.81 for
+    2026-08-05 instead of its actual 487.46).
+    """
+    try:
+        end = datetime.strptime(price_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return price_date, price_date
+    start = (end - timedelta(days=_TD_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    return start, (end + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def _fetch_td_historical(symbol: str, market: str,
                          security_name: Optional[str] = None,
                          price_date: str = "") -> Optional[float]:
-    """Fetch closing price from Twelvedata /time_series for a single date."""
+    """Fetch closing price from Twelvedata /time_series for a single date.
+
+    Requests a short window ending at price_date rather than
+    start_date == end_date: Twelvedata treats an identical start and end as
+    an empty interval and rejects it with HTTP 400 ("No data is available on
+    the specified dates"), which silently disabled this source entirely --
+    every cached price came from the yfinance fallback. The window also
+    covers weekends and market holidays, where the nearest prior trading day
+    is the correct answer; the selection loop below already picks the latest
+    row <= price_date.
+    """
     params = twelvedata_params(symbol, market, security_name)
+    _td_start, _td_end = _td_window(price_date)
     params.update({
         "apikey": TWELVEDATA_API_KEY,
         "interval": "1day",
-        "start_date": price_date,
-        "end_date": price_date,
+        "start_date": _td_start,
+        "end_date": _td_end,
         "outputsize": 5,
     })
     resp = requests.get(f"{_TD_BASE}/time_series", params=params, timeout=15)
@@ -118,7 +153,7 @@ def _fetch_td_historical(symbol: str, market: str,
 
     if data.get("status") == "error":
         logger.warning("Twelvedata time_series error for %s: %s",
-                       symbol, data.get("message", data))
+                       symbol, redact(data.get("message", data)))
         return None
 
     values = data.get("values", [])

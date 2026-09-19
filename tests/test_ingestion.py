@@ -7,8 +7,19 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from dotenv import dotenv_values
 
 from src.database.db import create_schema
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Fetched reports land in pdf_archive/; fall back to the original location.
+_PDF_CANDIDATES = [
+    PROJECT_ROOT / "Trans_Input" / "pdf_archive" / "IBI__000093395_001810.pdf",
+    PROJECT_ROOT / "Trans_Input" / "IBI__000093395_001810.pdf",
+]
+_REAL_PDF_PATH = next((p for p in _PDF_CANDIDATES if p.exists()), _PDF_CANDIDATES[0])
+_ENV = dotenv_values(PROJECT_ROOT / ".env")
+_REAL_PDF_PASSWORD = _ENV.get("IBI_PDF_PASSWORD")
 
 _HEBREW_COLS = [
     "תאריך", "סוג פעולה", "שם נייר", "מס' נייר / סימבול", "כמות",
@@ -148,3 +159,113 @@ class TestIngestPipeline:
         row = pipeline_env.execute("SELECT * FROM import_log").fetchone()
         assert row["source_file"] == "ibi.xlsx"
         assert row["rows_new"] == 4
+
+
+@pytest.fixture
+def pdf_pipeline_env(tmp_path):
+    """Same hermetic setup as pipeline_env, but with FX stubbed generically
+    (any date -> 3.7) since the real PDF's transaction dates aren't known
+    ahead of time the way the small Excel fixture's are."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    wrapper = _NonClosingConnection(conn)
+
+    def _fake_fx(dates):
+        return {d: 3.7 for d in dates}
+
+    with patch("src.database.db.get_connection", return_value=wrapper), \
+         patch("src.database.repository.get_connection", return_value=wrapper), \
+         patch("src.portfolio.ingestion.fetch_historical_fx", side_effect=_fake_fx), \
+         patch("src.portfolio.builder.get_price", return_value=200.0), \
+         patch("src.portfolio.builder._INITIAL_POS_PATH",
+               tmp_path / "no_initial_positions.json"):
+        create_schema()
+        yield conn
+    conn.close()
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF_PATH.exists() or not _REAL_PDF_PASSWORD,
+    reason="Real sample PDF or IBI_PDF_PASSWORD not available in this environment",
+)
+class TestIngestPdfSource:
+    """Confirms ingest() dispatches .pdf sources to read_pdf() and that
+    clean PDF-parsed rows flow through the same classify/dedup/build path
+    as Excel rows -- no parallel ingestion logic."""
+
+    def test_pdf_ingest_inserts_clean_rows_only(self, pdf_pipeline_env):
+        from src.portfolio.ingestion import ingest
+
+        result = ingest(_REAL_PDF_PATH, pdf_password=_REAL_PDF_PASSWORD)
+
+        assert result["rows_new"] > 0
+        # Only rows the converter could express in the app's vocabulary are
+        # inserted; anything quarantined must NOT reach the table. (This
+        # previously asserted quarantine was non-empty, encoding the old
+        # cluster-over-merge bug that lost ~37% of rows.)
+        n = pdf_pipeline_env.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        assert n == result["rows_new"]
+
+    def test_pdf_ingest_reingest_dedups(self, pdf_pipeline_env):
+        from src.portfolio.ingestion import ingest
+
+        first = ingest(_REAL_PDF_PATH, pdf_password=_REAL_PDF_PASSWORD)
+        second = ingest(_REAL_PDF_PATH, pdf_password=_REAL_PDF_PASSWORD)
+
+        assert second["rows_new"] == 0
+        assert second["rows_duplicate"] == first["rows_new"]
+
+    def test_pdf_ingest_msft_position_built(self, pdf_pipeline_env):
+        from src.portfolio.ingestion import ingest
+
+        result = ingest(_REAL_PDF_PATH, pdf_password=_REAL_PDF_PASSWORD)
+        # MSFT sold (qty -2) via the PDF's daily transaction log; confirms
+        # the translated tx_type + extracted ticker flow all the way
+        # through classify() -> builder.build() into a real position/trade,
+        # not just a row in the transactions table.
+        portfolio = result["portfolio"]
+        realized_symbols = {
+            r["security_symbol"] for r in
+            pdf_pipeline_env.execute("SELECT security_symbol FROM realized_trades").fetchall()
+        }
+        positions_usd = portfolio["positions_usd"]
+        assert "MSFT" in realized_symbols or "MSFT" in positions_usd
+
+
+class TestSkipBuildWhenUnchanged:
+    """A re-fetched PDF that inserts nothing must not trigger the full
+    rebuild: builder.build() truncates daily_portfolio_state and
+    realized_trades and recomputes every transaction (~8 min in production).
+    import_log ids 16/17 were two such no-op runs that each paid it."""
+
+    def test_rebuild_skipped_when_no_new_rows(self, fixture_xlsx, pipeline_env):
+        from src.portfolio.ingestion import ingest
+
+        ingest(fixture_xlsx)  # first import populates
+
+        with patch("src.portfolio.builder.build") as mock_build:
+            result = ingest(fixture_xlsx, skip_build_if_unchanged=True)
+
+        assert result["rows_new"] == 0
+        assert result["rows_duplicate"] == 4
+        mock_build.assert_not_called()
+
+    def test_rebuild_runs_when_rows_are_new(self, fixture_xlsx, pipeline_env):
+        from src.portfolio.ingestion import ingest
+
+        with patch("src.portfolio.builder.build") as mock_build:
+            mock_build.return_value = {}
+            ingest(fixture_xlsx, skip_build_if_unchanged=True)
+
+        mock_build.assert_called_once()
+
+    def test_default_still_rebuilds_unconditionally(self, fixture_xlsx, pipeline_env):
+        # The Streamlit callers rely on the old behaviour.
+        from src.portfolio.ingestion import ingest
+
+        ingest(fixture_xlsx)
+        with patch("src.portfolio.builder.build") as mock_build:
+            mock_build.return_value = {}
+            ingest(fixture_xlsx)
+
+        mock_build.assert_called_once()

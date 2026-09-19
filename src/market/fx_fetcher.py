@@ -17,6 +17,12 @@ def _api_key() -> str:
     return TWELVEDATA_API_KEY
 
 
+def _redact(value) -> str:
+    # Deferred like _api_key() above: src.config imports are kept lazy here.
+    from src.config import redact
+    return redact(value)
+
+
 def fetch_historical_fx(missing_dates: list[str]) -> dict[str, float]:
     """Fetch USD/ILS for a list of YYYY-MM-DD dates.
 
@@ -32,13 +38,13 @@ def fetch_historical_fx(missing_dates: list[str]) -> dict[str, float]:
         rates.update(_td_timeseries(remaining))
         remaining -= set(rates)
     except Exception as exc:
-        logger.warning("Twelvedata FX time_series failed: %s", exc)
+        logger.warning("Twelvedata FX time_series failed: %s", _redact(exc))
 
     if remaining:
         try:
             rates.update(_yf_fx(list(remaining)))
         except Exception as exc:
-            logger.warning("yfinance FX fallback failed: %s", exc)
+            logger.warning("yfinance FX fallback failed: %s", _redact(exc))
 
     return rates
 

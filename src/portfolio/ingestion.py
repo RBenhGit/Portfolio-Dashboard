@@ -1,4 +1,4 @@
-"""Ingestion pipeline: Excel → classify → FX fetch → dedup insert → build."""
+"""Ingestion pipeline: Excel/PDF → classify → FX fetch → dedup insert → build."""
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
@@ -7,6 +7,7 @@ from typing import Union
 from src.database import repository
 from src.database.db import create_schema
 from src.input.excel_reader import read_excel, iter_rows
+from src.input.pdf_reader import read_pdf
 from src.classifiers.ibi_classifier import IBIClassifier
 from src.market.fx_fetcher import fetch_historical_fx
 from src.portfolio import builder
@@ -14,12 +15,15 @@ from src.portfolio import builder
 logger = logging.getLogger(__name__)
 _classifier = IBIClassifier()
 
+_PDF_EXTENSIONS = {".pdf"}
 
-def ingest(source: Union[str, Path], trigger: str = "import") -> dict:
-    """Full ingestion pipeline for an IBI Excel file.
+
+def ingest(source: Union[str, Path], trigger: str = "import", pdf_password: str = None,
+           skip_build_if_unchanged: bool = False) -> dict:
+    """Full ingestion pipeline for an IBI Excel export or PDF account report.
 
     Steps:
-      1. Read + sort Excel → DataFrame
+      1. Read + sort source (Excel or PDF) → DataFrame
       2. Classify each row
       3. Fetch FX rates for all unique dates
       4. Backfill fx_rate_on_date and cost_basis_nis
@@ -27,12 +31,27 @@ def ingest(source: Union[str, Path], trigger: str = "import") -> dict:
       6. Run portfolio builder
       7. Save snapshot
 
+    A PDF source additionally returns "rows_quarantined" — rows the PDF
+    parser could not confidently parse and did not guess at (see
+    src/input/pdf_reader.py). These are never inserted; review them
+    manually against the source PDF.
+
     Returns dict with import stats + portfolio summary.
     """
     create_schema()
 
     source = Path(source)
-    df = read_excel(source)
+    quarantined: list = []
+    if source.suffix.lower() in _PDF_EXTENSIONS:
+        df, quarantined = read_pdf(source, password=pdf_password)
+        if quarantined:
+            logger.warning(
+                "%d row(s) from %s could not be parsed and were quarantined "
+                "(not inserted) — review them against the source PDF",
+                len(quarantined), source.name,
+            )
+    else:
+        df = read_excel(source)
     rows_total = len(df)
     logger.info("Read %d rows from %s", rows_total, source.name)
 
@@ -81,12 +100,20 @@ def ingest(source: Union[str, Path], trigger: str = "import") -> dict:
     logger.info("Inserted %d new rows, %d duplicates skipped", rows_new, rows_dup)
     repository.log_import(source.name, rows_total, rows_new, rows_dup)
 
-    # Build portfolio
-    portfolio_state = builder.build(trigger=trigger)
+    # Build portfolio. The rebuild is a full recompute over every transaction
+    # (~8 min, truncating daily_portfolio_state and realized_trades first), so
+    # skip it when nothing was inserted -- the existing state is already
+    # correct. Opt-in: the Streamlit callers still rebuild unconditionally.
+    if skip_build_if_unchanged and rows_new == 0:
+        logger.info("No new rows; skipping portfolio rebuild")
+        portfolio_state = repository.load_portfolio_current()
+    else:
+        portfolio_state = builder.build(trigger=trigger)
 
     return {
         "rows_total": rows_total,
         "rows_new": rows_new,
         "rows_duplicate": rows_dup,
+        "rows_quarantined": quarantined,
         "portfolio": portfolio_state,
     }
