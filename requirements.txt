@@ -6,3 +6,4 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 yfinance>=0.2.66
 twelvedata
+pdfplumber>=0.11.10

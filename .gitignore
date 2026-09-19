@@ -4,7 +4,15 @@ __pycache__/
 *.pyc
 .DS_Store
 .venv/
+venv/
 .claude/
 Trans_Input/*.xlsx
 output/
 tests/verification_data/*.xlsx
+# OAuth artifacts (removed; IMAP app password is used instead)
+credentials.json
+token.json
+logs/
+Trans_Input/pdf_archive/
+# Ad-hoc analysis dumps (contain holdings data; regenerate as needed)
+*_analysis.json
