@@ -38,6 +38,7 @@ _EXIT_MEANING = {
     2: "no new mail",
     3: "AUTH FAILED",
     4: "INGEST FAILED",
+    5: "already ingested",
 }
 
 
@@ -56,6 +57,11 @@ def build_summary(exit_code: int, pdf_name: Optional[str] = None,
             headline += f", {len(quarantined)} quarantined"
     elif exit_code == 2:
         headline = "no new report"
+    elif exit_code == 5:
+        # Not a failure, but not a successful import either: IBI has not
+        # issued a new report yet, so the newest one in the mailbox is the
+        # one already in the database.
+        headline = "already ingested — no new report from IBI"
     else:
         headline = f"PROBLEM — {meaning}"
 

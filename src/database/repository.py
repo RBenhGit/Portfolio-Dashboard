@@ -328,6 +328,31 @@ def log_import(source_file: str, rows_total: int,
     conn.close()
 
 
+def was_already_imported(source_file: str) -> bool:
+    """True if this source file has already been imported successfully.
+
+    The IMAP fetcher always returns the newest matching report, with no
+    memory of what was ingested, so a run in a month where the new report is
+    late re-fetches the previous one. Dedup makes that harmless, but the run
+    then reports "0 new rows", which is indistinguishable from a real report
+    that happened to add nothing. Callers use this to say "already ingested"
+    instead.
+
+    Only imports that actually inserted rows count: a previous run that
+    imported zero rows may have been partial or failed, and must not block a
+    retry.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM import_log WHERE source_file = ? AND rows_new > 0 LIMIT 1",
+            (source_file,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row is not None
+
+
 def get_last_import() -> sqlite3.Row | None:
     conn = get_connection()
     row = conn.execute(

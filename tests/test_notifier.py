@@ -96,3 +96,24 @@ class TestSend:
         with patch("src.input.notifier.smtplib.SMTP") as mock_smtp:
             assert nf.send("s", "b") is False
             mock_smtp.assert_not_called()
+
+
+class TestAlreadyIngested:
+    """Exit 5 must not read as a successful import: on a monthly schedule a
+    late report means the mailbox still holds the previous one, and
+    "OK - 0 new rows" would look like everything worked."""
+
+    def test_subject_says_already_ingested(self):
+        subject, body = build_summary(5, "IBI__000093395_001853.pdf")
+        assert "already ingested" in subject
+        assert "OK" not in subject
+        assert "PROBLEM" not in subject
+
+    def test_names_the_report(self):
+        _, body = build_summary(5, "IBI__000093395_001853.pdf")
+        assert "IBI__000093395_001853.pdf" in body
+
+    def test_distinct_from_no_mail_at_all(self):
+        already, _ = build_summary(5, "x.pdf")
+        no_mail, _ = build_summary(2)
+        assert already != no_mail

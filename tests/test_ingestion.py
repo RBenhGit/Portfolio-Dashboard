@@ -269,3 +269,30 @@ class TestSkipBuildWhenUnchanged:
             ingest(fixture_xlsx)
 
         mock_build.assert_called_once()
+
+
+class TestWasAlreadyImported:
+    """The fetcher has no memory of what it ingested, so run_import.py asks
+    import_log before re-parsing a report it has already imported."""
+
+    def test_false_for_unseen_file(self, pipeline_env):
+        from src.database.repository import was_already_imported
+
+        assert was_already_imported("never_seen.pdf") is False
+
+    def test_true_after_a_successful_import(self, fixture_xlsx, pipeline_env):
+        from src.database.repository import was_already_imported
+        from src.portfolio.ingestion import ingest
+
+        ingest(fixture_xlsx)
+        assert was_already_imported(fixture_xlsx.name) is True
+
+    def test_zero_row_import_does_not_block_a_retry(self, pipeline_env):
+        # A prior run that inserted nothing may have been partial or failed;
+        # it must not permanently lock the file out.
+        from src.database import repository
+        from src.database.repository import was_already_imported
+
+        repository.log_import("partial.pdf", rows_total=10, rows_new=0,
+                              rows_duplicate=0)
+        assert was_already_imported("partial.pdf") is False

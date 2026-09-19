@@ -9,6 +9,7 @@ Exit codes (mirrors scripts/gmail_fetch_probe.py's contract):
     2 = authed but no new/matching mail
     3 = auth unavailable (missing or rejected IMAP app password)
     4 = ingestion failed after a successful fetch
+    5 = the newest report was already ingested (IBI has not issued a new one)
 """
 import logging
 import sys
@@ -47,6 +48,19 @@ def main() -> int:
         return 2
 
     logger.info("Fetched %s", pdf_path)
+
+    # The fetcher always returns the newest matching report and has no memory
+    # of what was ingested, so a month where IBI is late re-delivers the
+    # previous report. Dedup would absorb it, but the run would then report
+    # "0 new rows" -- indistinguishable from a real report that added nothing.
+    from src.database.db import create_schema
+    from src.database.repository import was_already_imported
+
+    create_schema()
+    if was_already_imported(pdf_path.name):
+        logger.info("%s was already ingested; nothing new to import", pdf_path.name)
+        notifier.notify(5, pdf_name=pdf_path.name)
+        return 5
 
     from src.portfolio.ingestion import ingest
 
