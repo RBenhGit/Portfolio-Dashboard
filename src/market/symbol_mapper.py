@@ -12,7 +12,7 @@ from typing import Optional
 
 import requests
 
-from src.config import TWELVEDATA_API_KEY
+from src.config import TWELVEDATA_API_KEY, redact
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,13 @@ _KNOWN_TASE_MAP: dict[str, dict] = {
 _KNOWN_US_NUMERIC_IDS: dict[str, str] = {
     "1064054": "GOGL",     # Golden Ocean Group (NASDAQ: GOGL)
     "60217767": "SMED",    # Sharps Compliance Corp (NASDAQ: SMED)
+    # The PDF report prints no security name for these, so no ticker can be
+    # extracted from the row and the numeric id would otherwise be read as
+    # TASE. Identified by matching the PDF row's date/price/quantity against
+    # the Excel history: 105049 = MSFT 2026-07-14 -2 @ 388.00;
+    # 60307493 = NOW (the Excel row carries "SERVICENOW(NOW)").
+    "105049": "MSFT",      # Microsoft (NASDAQ: MSFT)
+    "60307493": "NOW",     # ServiceNow (NYSE: NOW)
 }
 
 # Runtime cache (populated from DB + API lookups).
@@ -210,7 +217,7 @@ def _search_twelvedata_once(query: str) -> tuple[str, str] | None:
             if item.get("exchange") == "TASE":
                 return item["symbol"], item.get("instrument_name", query)
     except Exception as exc:
-        logger.warning("Twelvedata symbol search failed for '%s': %s", query, exc)
+        logger.warning("Twelvedata symbol search failed for '%s': %s", query, redact(exc))
     return None
 
 
